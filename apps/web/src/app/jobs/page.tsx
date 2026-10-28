@@ -114,6 +114,7 @@ export default function JobsPage() {
   };
 
   const setOnlyPlatform = (onlyKey: AgentPlatformKey) => {
+    setSelectedPlatform('ALL');
     updatePlatformToggles({
       LINKEDIN: onlyKey === 'LINKEDIN',
       INSTAHYRE: onlyKey === 'INSTAHYRE',
@@ -126,6 +127,7 @@ export default function JobsPage() {
   };
 
   const setAllPlatforms = (state: boolean) => {
+    if (state) setSelectedPlatform('ALL');
     updatePlatformToggles({
       LINKEDIN: state,
       INSTAHYRE: state,
@@ -336,6 +338,12 @@ export default function JobsPage() {
     const comp = (j.company || '').toLowerCase();
     if (p === 'amazon' || p === 'siemens') {
       return src.includes(p) || comp.includes(p);
+    }
+    if (p === 'hiringcafe' || p === 'hiring.cafe' || p === 'hiring_cafe') {
+      return src.includes('hiringcafe') || src.includes('hiring.cafe') || src.includes('hiring cafe');
+    }
+    if (p === 'naukri' || p === 'naukri.com') {
+      return src.includes('naukri');
     }
     return src.includes(p);
   };
@@ -797,6 +805,8 @@ export default function JobsPage() {
           { id: 'ALL', label: 'All Ecosystems' },
           { id: 'APPLIED', label: '✅ Applied Jobs' },
           { id: 'Instahyre', label: '⚡ Instahyre' },
+          { id: 'HiringCafe', label: '☕ Hiring.cafe' },
+          { id: 'Naukri', label: '🇮🇳 Naukri.com' },
           { id: 'LinkedIn', label: '💼 LinkedIn Live' },
           { id: 'Amazon', label: '📦 Amazon Careers' },
           { id: 'Siemens', label: '⚙️ Siemens Careers' },
