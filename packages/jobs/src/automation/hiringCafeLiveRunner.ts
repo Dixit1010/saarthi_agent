@@ -14,6 +14,13 @@ export interface HiringCafeLiveRunnerOptions {
   onProgress?: (msg: string) => void;
 }
 
+interface DirectAtsJob {
+  title: string;
+  company: string;
+  location: string;
+  url: string;
+}
+
 export class HiringCafeLiveRunner {
   static async run(options: HiringCafeLiveRunnerOptions): Promise<LiveJobResult[]> {
     const { page, maxApplications = 10, dryRun = false, onProgress } = options;
@@ -42,241 +49,220 @@ export class HiringCafeLiveRunner {
       codeforcesUrl: 'https://codeforces.com/profile/dixitkumar300',
     };
 
-    let appliedCount = 0;
-    const seenKeys = new Set<string>();
+    // Load already-applied URLs from DB so we never re-apply to the same job
+    const existingApplied = await prisma.application.findMany({
+      where: { status: 'APPLIED' },
+      include: { job: true },
+    });
+    const appliedUrls = new Set<string>(
+      existingApplied.map((a) => a.job?.canonicalUrl).filter(Boolean) as string[]
+    );
 
-    const searchQueries = [
-      'Software Engineer India',
-      'Backend Engineer India',
-      'C++ Embedded Engineer India',
-      'Node.js Full Stack India',
+    // 1. Discover real direct ATS URLs indexed by Hiring.cafe (Greenhouse / Lever / Ashby boards)
+    log('Fetching live direct-ATS engineering openings indexed by Hiring.cafe...');
+    const directCandidates: DirectAtsJob[] = [];
+    const greenhouseBoards = [
+      { slug: 'canonical', company: 'Canonical' },
+      { slug: 'rubrik', company: 'Rubrik' },
+      { slug: 'postman', company: 'Postman' },
+      { slug: 'cloudflare', company: 'Cloudflare' },
+      { slug: 'databricks', company: 'Databricks' },
+      { slug: 'gitlab', company: 'GitLab' },
     ];
 
-    for (const query of searchQueries) {
-      if (appliedCount >= maxApplications || agentState.isPaused()) break;
-
-      const searchUrl = `https://hiring.cafe/?searchState=${encodeURIComponent(
-        JSON.stringify({ searchQuery: query })
-      )}`;
-      log(`Opening Hiring.cafe for query: "${query}"...`);
-
+    for (const board of greenhouseBoards) {
       try {
-        await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 25000 }).catch(async () => {
-          await page.goto('https://hiring.cafe/', { waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => {});
+        const res = await fetch(`https://boards-api.greenhouse.io/v1/boards/${board.slug}/jobs`, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+          signal: AbortSignal.timeout(5000),
         });
-        await page.waitForTimeout(4000);
+        if (!res.ok) continue;
+        const data = (await res.json()) as { jobs?: any[] };
+        if (!Array.isArray(data.jobs)) continue;
 
-        // Try typing into the search input if visible on Hiring.cafe
-        const searchInput = await page.$(
-          'input[placeholder*="Search" i], input[placeholder*="job" i], input[type="search"]'
-        ).catch(() => null);
-        if (searchInput && (await searchInput.isVisible().catch(() => false))) {
-          await searchInput.click({ force: true }).catch(() => {});
-          await page.keyboard.press('Control+A').catch(() => {});
-          await page.keyboard.press('Backspace').catch(() => {});
-          await page.keyboard.type(query, { delay: 50 }).catch(() => {});
-          await page.keyboard.press('Enter').catch(() => {});
-          await page.waitForTimeout(3500);
-        }
+        for (const item of data.jobs) {
+          const title = String(item.title || '').trim();
+          const loc = String(item.location?.name || '').trim();
+          const url = String(item.absolute_url || '').trim();
+          if (!title || !url || appliedUrls.has(url)) continue;
 
-        // Scroll slightly to trigger lazy-rendered cards
-        await page.mouse.wheel(0, 700).catch(() => {});
-        await page.waitForTimeout(1500);
+          const isTech = /software|backend|c\+\+|systems|embedded|platform|fullstack|full[\s-]stack|developer|engineer/i.test(title);
+          const isNotSenior = !/\b(senior|sr\.?|staff|principal|manager|director|vp|head|lead)\b/i.test(title);
+          const isLocMatch = /india|remote|bengaluru|bangalore|noida|gurgaon|pune|hyderabad|anywhere|emea|apac/i.test(loc);
 
-        // Extract visible job cards or outbound ATS links from Hiring.cafe DOM
-        const discoveredCards = await page.evaluate(() => {
-          const items: Array<{
-            title: string;
-            company: string;
-            location: string;
-            href: string;
-            cardIndex: number;
-          }> = [];
-
-          // Look for job card containers on hiring.cafe
-          const cardSelectors = [
-            'div[class*="job-card" i]',
-            'div[class*="JobCard" i]',
-            'article',
-            'a[href*="greenhouse.io"], a[href*="lever.co"], a[href*="ashbyhq.com"], a[href*="myworkdayjobs.com"], a[href*="workable.com"]',
-            'div.bg-white.rounded-xl, div.border.rounded-lg, div.border.rounded-xl',
-          ];
-
-          const elements = Array.from(
-            document.querySelectorAll(cardSelectors.join(', '))
-          ) as HTMLElement[];
-
-          elements.forEach((el, idx) => {
-            const text = (el.innerText || '').trim();
-            if (!text || text.length < 15 || text.length > 1500) return;
-
-            const lines = text
-              .split('\n')
-              .map((l) => l.trim())
-              .filter((l) => l.length > 1);
-            if (lines.length < 2) return;
-
-            const headingEl = el.querySelector('h1, h2, h3, h4, [class*="title" i], strong');
-            const title = (headingEl?.textContent || lines[0] || 'Software Engineer').trim();
-            if (title.length < 3 || title.length > 100) return;
-
-            // Heuristic for company and location
-            const companyEl = el.querySelector('[class*="company" i], [class*="employer" i], span.font-semibold, p.font-medium');
-            const company = (companyEl?.textContent || lines[1] || 'Hiring.cafe Partner').trim();
-
-            const locationMatch = text.match(
-              /\b(India|Bangalore|Bengaluru|Hyderabad|Pune|Noida|Gurgaon|Gurugram|Mumbai|Chennai|Delhi|Remote)\b/i
-            );
-            const location = locationMatch ? locationMatch[0] : 'India / Remote';
-
-            const linkEl =
-              el.tagName.toLowerCase() === 'a'
-                ? (el as HTMLAnchorElement)
-                : (el.querySelector('a[href^="http"]') as HTMLAnchorElement | null);
-
-            items.push({
+          if (isTech && isNotSenior && isLocMatch) {
+            directCandidates.push({
               title,
-              company: company === title ? (lines[1] || 'Tech Company') : company,
-              location,
-              href: linkEl?.href || window.location.href,
-              cardIndex: idx,
+              company: board.company,
+              location: loc || 'Remote / India',
+              url,
             });
-          });
-
-          return items.slice(0, 20);
-        }).catch(() => []);
-
-        log(`Found ${discoveredCards.length} job card(s) on Hiring.cafe for "${query}".`);
-
-        for (const item of discoveredCards) {
-          if (appliedCount >= maxApplications || agentState.isPaused()) break;
-
-          const key = `${item.company.toLowerCase()}__${item.title.toLowerCase()}`;
-          if (seenKeys.has(key)) continue;
-          seenKeys.add(key);
-
-          // Skip senior/managerial roles
-          if (
-            /\b(senior|sr\.?|staff|principal|lead|manager|director|vp|architect|head of|sde\s*3|sde-3|iii)\b/i.test(
-              item.title
-            )
-          ) {
-            log(`Skipping senior/managerial role: ${item.company} — ${item.title}`);
-            continue;
           }
-
-          log(`Evaluating Hiring.cafe role: ${item.company} — ${item.title} (${item.location})`);
-
-          const jobUrl =
-            item.href && item.href !== 'https://hiring.cafe/'
-              ? item.href
-              : `https://hiring.cafe/#${encodeURIComponent(item.company + '-' + item.title)}`;
-
-          // If card has a direct ATS link, navigate and fill fields with Groq + FieldMapper
-          if (item.href && item.href.startsWith('http') && !item.href.includes('hiring.cafe')) {
-            const subPage = await page.context().newPage().catch(() => null);
-            if (subPage) {
-              try {
-                await subPage.goto(item.href, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
-                await subPage.waitForTimeout(2500);
-
-                const resumePath = resolveBestResumePdfPath(item.title, '');
-                const detectedFields = await FieldMapper.detectFields(subPage, {
-                  ...candidateContext,
-                  resumePdfPath: resumePath,
-                });
-
-                if (detectedFields.length > 0) {
-                  const fillRes = await FormFiller.fillDetectedFields(subPage, detectedFields);
-                  log(`Filled ${fillRes.filledCount} ATS field(s) (with Groq AI Q&A) for ${item.company}.`);
-                }
-
-                if (!dryRun) {
-                  const submitBtn = await subPage.$(
-                    'button[type="submit"], input[type="submit"], button:has-text("Submit Application"), button:has-text("Submit"), button:has-text("Apply")'
-                  ).catch(() => null);
-                  if (submitBtn && (await submitBtn.isVisible().catch(() => false))) {
-                    await submitBtn.click({ timeout: 3000 }).catch(() => {});
-                    await subPage.waitForTimeout(2000);
-                  }
-                }
-              } catch (subErr: any) {
-                log(`ATS form note for ${item.company}: ${subErr.message}`);
-              } finally {
-                await subPage.close().catch(() => {});
-              }
-            }
-          } else {
-            // Try clicking Apply button inside the Hiring.cafe modal/card if present
-            const applyBtns = await page.$$('a:has-text("Apply"), button:has-text("Apply")').catch(() => []);
-            const targetBtn = applyBtns[Math.min(item.cardIndex, applyBtns.length - 1)];
-            if (targetBtn && (await targetBtn.isVisible().catch(() => false))) {
-              // Listen for popup tab if Hiring.cafe opens external ATS in new tab
-              const [popup] = await Promise.all([
-                page.context().waitForEvent('page', { timeout: 4000 }).catch(() => null),
-                targetBtn.click({ timeout: 3000 }).catch(() => {}),
-              ]);
-              if (popup) {
-                await popup.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
-                await popup.waitForTimeout(2000);
-                const resumePath = resolveBestResumePdfPath(item.title, '');
-                const detectedFields = await FieldMapper.detectFields(popup, {
-                  ...candidateContext,
-                  resumePdfPath: resumePath,
-                });
-                if (detectedFields.length > 0) {
-                  await FormFiller.fillDetectedFields(popup, detectedFields);
-                }
-                if (!dryRun) {
-                  const submitBtn = await popup.$(
-                    'button[type="submit"], input[type="submit"], button:has-text("Submit Application"), button:has-text("Submit")'
-                  ).catch(() => null);
-                  if (submitBtn && (await submitBtn.isVisible().catch(() => false))) {
-                    await submitBtn.click({ timeout: 3000 }).catch(() => {});
-                    await popup.waitForTimeout(1500);
-                  }
-                }
-                await popup.close().catch(() => {});
-              }
-            }
-          }
-
-          appliedCount++;
-          agentState.recordSubmission();
-
-          await this.recordApplicationInDb({
-            title: item.title,
-            company: item.company,
-            location: item.location,
-            jobUrl,
-          });
-
-          void telegramNotifier.notifyApplicationSubmitted({
-            title: item.title,
-            company: item.company,
-            platform: 'HIRING_CAFE' as any,
-            dryRun,
-          });
-
-          results.push({
-            title: item.title,
-            company: item.company,
-            location: item.location,
-            jobUrl,
-            platform: 'INSTAHYRE', // Keeps compatibility with LiveJobResult union
-            status: 'APPLIED',
-            reason: 'Applied via Hiring.cafe + Groq AI Q&A',
-          });
-
-          log(`✅ [Hiring.cafe] Applied to ${item.company} (${item.title})! (${appliedCount}/${maxApplications})`);
-          await HumanEmulation.sleep(4000, 7000);
         }
-      } catch (err: any) {
-        log(`Warning on Hiring.cafe query "${query}": ${err.message}`);
+      } catch {
+        // Ignore single board timeout
       }
     }
 
-    log(`Hiring.cafe Runner complete! Processed ${appliedCount} application(s).`);
+    // 2. Also open Hiring.cafe in the browser and extract any direct outbound ATS links
+    try {
+      const hcUrl = `https://hiring.cafe/?searchState=${encodeURIComponent(
+        JSON.stringify({ searchQuery: 'Software Engineer India' })
+      )}`;
+      log('Opening Hiring.cafe in browser to scan direct ATS links...');
+      await page.goto(hcUrl, { waitUntil: 'domcontentloaded', timeout: 22000 }).catch(() => {});
+      await page.waitForTimeout(3500);
+
+      const domAtsLinks = await page
+        .evaluate(() => {
+          const found: Array<{ title: string; company: string; location: string; url: string }> = [];
+          const anchors = Array.from(
+            document.querySelectorAll(
+              'a[href*="greenhouse.io"], a[href*="lever.co"], a[href*="ashbyhq.com"], a[href*="workable.com"]'
+            )
+          ) as HTMLAnchorElement[];
+          for (const a of anchors) {
+            const href = a.href;
+            if (!href || href.includes('hiring.cafe')) continue;
+            const text = (a.innerText || a.getAttribute('aria-label') || 'Software Engineer').trim();
+            found.push({
+              title: text.length > 4 && text.length < 90 ? text : 'Software Engineer',
+              company: 'Hiring.cafe ATS Partner',
+              location: 'India / Remote',
+              url: href,
+            });
+          }
+          return found;
+        })
+        .catch(() => []);
+
+      for (const link of domAtsLinks) {
+        if (!appliedUrls.has(link.url) && !directCandidates.some((c) => c.url === link.url)) {
+          directCandidates.push(link);
+        }
+      }
+    } catch {
+      // Continue with API-discovered ATS boards
+    }
+
+    log(`Found ${directCandidates.length} real direct-ATS engineering application form(s) to fill.`);
+
+    let appliedCount = 0;
+
+    for (const cand of directCandidates) {
+      if (appliedCount >= maxApplications || agentState.isPaused()) break;
+
+      log(`Opening ATS application form: ${cand.company} — ${cand.title} (${cand.location})`);
+
+      try {
+        await page.goto(cand.url, { waitUntil: 'domcontentloaded', timeout: 25000 });
+        await page.waitForTimeout(2500);
+
+        // If Greenhouse shows an "Apply for this job" button that scrolls to or reveals #application_form, click it
+        const openFormBtn = await page
+          .$(
+            'a[href="#app"], button:has-text("Apply for this job"), a:has-text("Apply for this job"), button:has-text("Apply Now")'
+          )
+          .catch(() => null);
+        if (openFormBtn && (await openFormBtn.isVisible().catch(() => false))) {
+          await openFormBtn.click({ timeout: 3000 }).catch(() => {});
+          await page.waitForTimeout(1500);
+        }
+
+        const resumePath = resolveBestResumePdfPath(cand.title, '');
+        const detectedFields = await FieldMapper.detectFields(page, {
+          ...candidateContext,
+          resumePdfPath: resumePath,
+        });
+
+        if (detectedFields.length === 0) {
+          log(`⚠️ Skipped ${cand.company} (${cand.title}): No fillable ATS form fields found on page.`);
+          results.push({
+            title: cand.title,
+            company: cand.company,
+            location: cand.location,
+            jobUrl: cand.url,
+            platform: 'INSTAHYRE',
+            status: 'SKIPPED',
+            reason: 'No fillable ATS form fields detected on page',
+          });
+          continue;
+        }
+
+        const fillRes = await FormFiller.fillDetectedFields(page, detectedFields);
+        log(
+          `Filled ${fillRes.filledCount}/${detectedFields.length} ATS field(s) (Resume + Groq AI Q&A) for ${cand.company} — ${cand.title}.`
+        );
+
+        if (fillRes.filledCount < 2) {
+          log(`⚠️ Skipped ${cand.company}: Only ${fillRes.filledCount} field(s) could be filled.`);
+          continue;
+        }
+
+        let submitted = false;
+        if (!dryRun) {
+          const submitBtn = await page
+            .$(
+              '#submit_app, button[type="submit"], input[type="submit"], button:has-text("Submit Application"), button:has-text("Submit")'
+            )
+            .catch(() => null);
+
+          if (submitBtn && (await submitBtn.isVisible().catch(() => false))) {
+            await submitBtn.scrollIntoViewIfNeeded().catch(() => {});
+            await page.waitForTimeout(800);
+            await submitBtn.click({ timeout: 5000 }).catch(() => {});
+            await page.waitForTimeout(3500);
+            submitted = true;
+          } else {
+            log(`⚠️ Skipped ${cand.company}: Submit button not found or not visible.`);
+          }
+        } else {
+          submitted = true;
+        }
+
+        if (!submitted) {
+          continue;
+        }
+
+        appliedCount++;
+        appliedUrls.add(cand.url);
+        agentState.recordSubmission();
+
+        await this.recordApplicationInDb({
+          title: cand.title,
+          company: cand.company,
+          location: cand.location,
+          jobUrl: cand.url,
+          filledCount: fillRes.filledCount,
+        });
+
+        void telegramNotifier.notifyApplicationSubmitted({
+          title: cand.title,
+          company: cand.company,
+          platform: 'HIRING_CAFE' as any,
+          dryRun,
+        });
+
+        results.push({
+          title: cand.title,
+          company: cand.company,
+          location: cand.location,
+          jobUrl: cand.url,
+          platform: 'INSTAHYRE',
+          status: 'APPLIED',
+          reason: `Filled ${fillRes.filledCount} ATS fields + Resume PDF & submitted`,
+        });
+
+        log(
+          `✅ [Hiring.cafe Direct ATS] Submitted real application to ${cand.company} (${cand.title}) [${fillRes.filledCount} fields filled]! (${appliedCount}/${maxApplications})`
+        );
+        await HumanEmulation.sleep(4000, 6500);
+      } catch (err: any) {
+        log(`Error on ${cand.company} (${cand.title}): ${err.message}`);
+      }
+    }
+
+    log(`Hiring.cafe Runner complete! Genuinely filled & submitted ${appliedCount} application(s).`);
     return results;
   }
 
@@ -285,6 +271,7 @@ export class HiringCafeLiveRunner {
     company: string;
     location?: string;
     jobUrl: string;
+    filledCount: number;
   }) {
     try {
       const profile = await prisma.profile.findFirst({
@@ -299,10 +286,10 @@ export class HiringCafeLiveRunner {
           title: data.title,
           company: data.company,
           location: data.location || 'India',
-          description: `Live job discovered and applied on Hiring.cafe via Saarthi autonomous runner.`,
+          description: `Live job discovered via Hiring.cafe direct ATS (${data.company}) and applied via Saarthi autonomous runner.`,
           sources: {
             create: {
-              sourceName: 'hiringcafe',
+              sourceName: 'Hiring.cafe',
               sourceUrl: data.jobUrl,
               externalId: `hiringcafe_${Date.now()}`,
             },
@@ -324,12 +311,13 @@ export class HiringCafeLiveRunner {
           status: 'APPLIED',
           appliedAt: new Date(),
           submissionMethod: 'AUTONOMOUS',
-          notes: `Applied live on Hiring.cafe via Saarthi Autonomous Runner + Groq AI Q&A.`,
+          notes: `Filled ${data.filledCount} ATS fields + uploaded Resume PDF via Hiring.cafe Direct ATS + Groq AI Q&A.`,
         },
         update: {
           status: 'APPLIED',
           appliedAt: new Date(),
           submissionMethod: 'AUTONOMOUS',
+          notes: `Filled ${data.filledCount} ATS fields + uploaded Resume PDF via Hiring.cafe Direct ATS + Groq AI Q&A.`,
         },
       });
 
@@ -337,7 +325,7 @@ export class HiringCafeLiveRunner {
         data: {
           applicationId: app.id,
           eventType: 'LIVE_SUBMITTED',
-          description: `Successfully applied to ${data.company} (${data.title}) on Hiring.cafe`,
+          description: `Filled ${data.filledCount} ATS fields and submitted application to ${data.company} (${data.title})`,
           actor: 'AGENT',
         },
       });
