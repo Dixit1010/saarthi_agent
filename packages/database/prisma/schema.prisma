@@ -1,0 +1,364 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// -------------------------------------------------------------
+// 1. Identity & Profile Domain
+// -------------------------------------------------------------
+
+model User {
+  id           String        @id @default(cuid())
+  email        String        @unique
+  passwordHash String
+  name         String
+  role         String        @default("USER")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  profile        Profile?
+  applications   Application[]
+  notifications  Notification[]
+  preferences    UserPreference?
+  automationRule AutomationRule?
+}
+
+model Profile {
+  id         String   @id @default(cuid())
+  userId     String   @unique
+  phone      String?
+  location   String   @default("Noida, India")
+  bio        String?
+  education  String   @default("[]") // JSON serialized EducationEntry[]
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  skills       Skill[]
+  experiences  Experience[]
+  projects     Project[]
+  resumes      Resume[]
+  jobMatches   JobMatch[]
+}
+
+model Skill {
+  id              String   @id @default(cuid())
+  profileId       String
+  name            String
+  category        String?
+  yearsExperience Float?
+  verified        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+}
+
+model Experience {
+  id             String   @id @default(cuid())
+  profileId      String
+  company        String
+  role           String
+  employmentType String   @default("FULL_TIME")
+  location       String?
+  startDate      DateTime
+  endDate        DateTime?
+  isCurrent      Boolean  @default(false)
+  technologies   String   @default("[]") // JSON serialized string[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  profile      Profile       @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  achievements Achievement[]
+}
+
+model Achievement {
+  id           String   @id @default(cuid())
+  experienceId String
+  text         String
+  metrics      String   @default("[]") // JSON serialized string[]
+  verified     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  experience Experience @relation(fields: [experienceId], references: [id], onDelete: Cascade)
+}
+
+model Project {
+  id                String   @id @default(cuid())
+  profileId         String
+  name              String
+  description       String
+  problem           String?
+  solution          String?
+  technologies      String   @default("[]") // JSON serialized string[]
+  githubUrl         String?
+  liveUrl           String?
+  measurableResults String   @default("[]") // JSON serialized string[]
+  verified          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+}
+
+// -------------------------------------------------------------
+// 2. Resume & Provenance Domain
+// -------------------------------------------------------------
+
+model Resume {
+  id         String   @id @default(cuid())
+  profileId  String
+  title      String
+  targetRole String?
+  isMaster   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  profile  Profile         @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  versions ResumeVersion[]
+}
+
+model ResumeVersion {
+  id            String   @id @default(cuid())
+  resumeId      String
+  versionNumber Int
+  jobId         String?
+  content       String   @default("{}") // JSON serialized resume document
+  fileUrlPdf    String?
+  fileUrlDocx   String?
+  atsScore      Int?
+  atsReport     String?  // JSON serialized ATS breakdown
+  createdAt     DateTime @default(now())
+
+  resume       Resume         @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+  job          Job?           @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  sources      ResumeSource[]
+  applications Application[]
+}
+
+model ResumeSource {
+  id              String   @id @default(cuid())
+  resumeVersionId String
+  bulletText      String
+  sourceType      String   // "EXPERIENCE", "ACHIEVEMENT", "PROJECT"
+  sourceId        String
+  createdAt       DateTime @default(now())
+
+  resumeVersion ResumeVersion @relation(fields: [resumeVersionId], references: [id], onDelete: Cascade)
+}
+
+// -------------------------------------------------------------
+// 3. Job Engine Domain
+// -------------------------------------------------------------
+
+model Job {
+  id             String   @id @default(cuid())
+  canonicalUrl   String   @unique
+  title          String
+  company        String
+  location       String
+  locationType   String   @default("ONSITE") // REMOTE, HYBRID, ONSITE
+  employmentType String   @default("FULL_TIME")
+  description    String
+  salaryMin      Float?
+  salaryMax      Float?
+  salaryCurrency String   @default("INR")
+  experienceMin  Int?
+  experienceMax  Int?
+  status         String   @default("ACTIVE")
+  postedAt       DateTime?
+  discoveredAt   DateTime @default(now())
+
+  sources        JobSource[]
+  skills         JobSkill[]
+  matches        JobMatch[]
+  applications   Application[]
+  resumeVersions ResumeVersion[]
+}
+
+model JobSource {
+  id           String   @id @default(cuid())
+  jobId        String
+  sourceName   String   // CAREER_PAGE, API, SEARCH, MANUAL
+  sourceUrl    String
+  externalId   String?
+  discoveredAt DateTime @default(now())
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+}
+
+model JobSkill {
+  id         String   @id @default(cuid())
+  jobId      String
+  name       String
+  isRequired Boolean  @default(true)
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+}
+
+model JobMatch {
+  id            String   @id @default(cuid())
+  jobId         String
+  profileId     String
+  score         Int
+  breakdown     String   @default("{}") // JSON serialized breakdown
+  matchedSkills String   @default("[]") // JSON serialized string[]
+  missingSkills String   @default("[]") // JSON serialized string[]
+  partialSkills String   @default("[]") // JSON serialized string[]
+  reasons       String   @default("[]") // JSON serialized string[]
+  createdAt     DateTime @default(now())
+
+  job     Job     @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, profileId])
+}
+
+// -------------------------------------------------------------
+// 4. Applications & Audit Domain
+// -------------------------------------------------------------
+
+model Application {
+  id               String    @id @default(cuid())
+  userId           String
+  jobId            String
+  resumeVersionId  String?
+  status           String    @default("DISCOVERED")
+  appliedAt        DateTime?
+  submissionMethod String    @default("ASSISTED")
+  coverLetterText  String?
+  notes            String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job           Job                 @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  resumeVersion ResumeVersion?      @relation(fields: [resumeVersionId], references: [id], onDelete: SetNull)
+  answers       ApplicationAnswer[]
+  events        ApplicationEvent[]
+
+  @@unique([userId, jobId])
+}
+
+model ApplicationAnswer {
+  id             String   @id @default(cuid())
+  applicationId  String
+  question       String
+  answer         String
+  confidence     Float    @default(0.9)
+  requiresReview Boolean  @default(false)
+  sources        String   @default("[]") // JSON serialized source links
+  isApproved     Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+}
+
+model ApplicationEvent {
+  id            String   @id @default(cuid())
+  applicationId String
+  eventType     String
+  description   String
+  actor         String   @default("AGENT") // AGENT, USER
+  payload       String?  // JSON serialized extra context
+  createdAt     DateTime @default(now())
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+}
+
+// -------------------------------------------------------------
+// 5. Agent Orchestration Domain
+// -------------------------------------------------------------
+
+model AgentRun {
+  id                   String    @id @default(cuid())
+  trigger              String    @default("MANUAL") // MANUAL, SCHEDULED, BATCH
+  status               String    @default("PENDING") // PENDING, RUNNING, COMPLETED, FAILED, PAUSED_FOR_HUMAN
+  jobsScanned          Int       @default(0)
+  newJobs              Int       @default(0)
+  qualified            Int       @default(0)
+  resumesGenerated     Int       @default(0)
+  applicationsPrepared Int       @default(0)
+  submitted            Int       @default(0)
+  needsReview          Int       @default(0)
+  startedAt            DateTime  @default(now())
+  finishedAt           DateTime?
+
+  tasks AgentTask[]
+  logs  AgentLog[]
+}
+
+model AgentTask {
+  id         String    @id @default(cuid())
+  agentRunId String
+  taskType   String    // DISCOVER, PARSE_JD, SCORE_MATCH, TAILOR_RESUME, FILL_FORM, SUBMIT
+  status     String    @default("PENDING") // PENDING, IN_PROGRESS, SUCCESS, FAILED
+  payload    String?   // JSON serialized payload
+  error      String?
+  startedAt  DateTime  @default(now())
+  endedAt    DateTime?
+
+  agentRun AgentRun @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
+}
+
+model AgentLog {
+  id         String   @id @default(cuid())
+  agentRunId String
+  level      String   @default("INFO") // INFO, WARN, ERROR
+  message    String
+  metadata   String?  // JSON serialized metadata
+  timestamp  DateTime @default(now())
+
+  agentRun AgentRun @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
+}
+
+// -------------------------------------------------------------
+// 6. System & Preferences Domain
+// -------------------------------------------------------------
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  message   String
+  type      String   @default("INFO") // HIGH_MATCH, APPROVAL_REQUIRED, SUBMITTED, INTERVIEW, FAILED
+  isRead    Boolean  @default(false)
+  link      String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model UserPreference {
+  id                 String   @id @default(cuid())
+  userId             String   @unique
+  targetRoles        String   @default("[]") // JSON serialized string[]
+  targetLocations    String   @default("[]") // JSON serialized string[]
+  remotePreference   String   @default("ANY")
+  experienceMin      Int      @default(0)
+  experienceMax      Int      @default(3)
+  salaryMin          Float?
+  noticePeriod       String?
+  excludedCompanies  String   @default("[]")
+  excludedKeywords   String   @default("[]")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AutomationRule {
+  id                       String   @id @default(cuid())
+  userId                   String   @unique
+  mode                     String   @default("ASSISTED") // MANUAL, ASSISTED, AUTONOMOUS
+  minimumMatchScore        Int      @default(80)
+  dailyApplicationCap      Int      @default(10)
+  requireApprovalForSubmit Boolean  @default(true)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}

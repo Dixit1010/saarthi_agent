@@ -1,0 +1,24 @@
+{
+  "name": "@saarthi/resume",
+  "version": "1.0.0",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "check-types": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@saarthi/ai": "workspace:*",
+    "@saarthi/database": "workspace:*",
+    "@saarthi/shared": "workspace:*",
+    "mammoth": "^1.9.0",
+    "pdf-parse": "^1.1.1",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.9",
+    "@types/pdf-parse": "^1.1.4",
+    "typescript": "^5.8.2"
+  }
+}

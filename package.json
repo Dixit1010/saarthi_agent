@@ -1,0 +1,29 @@
+{
+  "name": "saarthi-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Saarthi AI — Autonomous Job Search & Application Agent",
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "check-types": "turbo run check-types",
+    "clean": "turbo run clean",
+    "db:generate": "pnpm --filter @saarthi/database db:generate",
+    "db:push": "pnpm --filter @saarthi/database db:push",
+    "db:seed": "pnpm --filter @saarthi/database db:seed",
+    "apply:live": "tsx packages/jobs/src/scripts/runLiveApply.ts --live",
+    "apply:live:dry": "tsx packages/jobs/src/scripts/runLiveApply.ts --dry-run",
+    "test:telegram-dummy": "tsx packages/jobs/src/scripts/runTelegramDummyTest.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.3",
+    "turbo": "^2.4.4",
+    "typescript": "^5.8.2"
+  },
+  "packageManager": "pnpm@10.28.1",
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

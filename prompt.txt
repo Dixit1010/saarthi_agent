@@ -1,0 +1,1945 @@
+# Build: Saarthi AI — Autonomous Job Search & Application Agent
+
+You are a senior staff-level full-stack engineer, AI engineer, browser automation engineer, and product architect.
+
+I want you to build a production-quality AI-powered job search and application platform called **Saarthi AI**.
+
+The goal is to turn an existing job-hunt workspace into an intelligent job-search agent that can:
+
+1. Discover relevant jobs automatically.
+2. Parse and understand job descriptions.
+3. Match jobs against the user's profile, skills, experience, preferences, and resume.
+4. Score and rank jobs based on transparent matching criteria.
+5. Generate a JD-specific tailored resume without fabricating experience.
+6. Generate tailored cover letters and application answers.
+7. Autofill application forms using browser automation where permitted.
+8. Ask for human approval before final submission by default.
+9. Track every application and its status.
+10. Run scheduled job discovery automatically.
+11. Maintain a complete audit trail of agent actions.
+12. Learn from the user's application history and preferences without silently changing important criteria.
+
+The product should feel like a **personal AI job-search employee**, not a simple job board.
+
+---
+
+# 1. IMPORTANT PRODUCT PRINCIPLES
+
+## Accuracy over automation
+
+Never invent:
+
+* employment experience
+* years of experience
+* companies
+* projects
+* technologies
+* certifications
+* education
+* achievements
+* salary
+* job titles
+* responsibilities
+
+The AI may rephrase existing facts but may not create new facts.
+
+Every generated resume bullet should be traceable to information in the user's master profile, experience bank, project bank, or verified application history.
+
+---
+
+# 2. HUMAN CONTROL
+
+The default mode must be:
+
+DISCOVER → ANALYZE → TAILOR → PREPARE → HUMAN REVIEW → SUBMIT
+
+Do NOT automatically submit applications by default.
+
+Provide three automation modes:
+
+### MANUAL
+
+The agent only discovers and analyzes jobs.
+
+### ASSISTED
+
+The agent:
+
+* finds job
+* scores it
+* generates resume
+* generates answers
+* opens application
+* fills fields
+* stops before final submission
+
+User clicks:
+
+"Approve & Submit"
+
+### AUTONOMOUS
+
+Allow auto-submission only when:
+
+* the user explicitly enables it
+* the site/application flow is supported
+* there are no sensitive or ambiguous questions
+* all required answers are derived from verified user data
+* no CAPTCHA or anti-bot challenge is encountered
+* no unsupported terms or commitments are required
+
+If any unsafe/ambiguous situation appears, pause and ask the user.
+
+Never bypass CAPTCHA, anti-bot mechanisms, authentication protections, rate limits, or access controls.
+
+Respect website terms, robots rules where applicable, and official APIs/integrations where available.
+
+---
+
+# 3. CORE USER PROFILE
+
+Create a master profile system.
+
+Example:
+
+```json
+{
+  "name": "Dixit Kumar",
+  "email": "",
+  "phone": "",
+  "location": "Noida, India",
+
+  "education": [
+    {
+      "degree": "B.Tech",
+      "field": "Electronics and Communication Engineering",
+      "institution": "NSUT",
+      "start": "2021",
+      "end": "2025"
+    }
+  ],
+
+  "experience": [],
+
+  "skills": [],
+
+  "projects": [],
+
+  "certifications": [],
+
+  "preferences": {
+    "roles": [],
+    "locations": [],
+    "remote": true,
+    "minimum_experience": 0,
+    "maximum_experience": 3,
+    "minimum_salary": null,
+    "notice_period": ""
+  }
+}
+```
+
+Do not hard-code my personal information.
+
+The application should allow me to edit everything from the UI.
+
+---
+
+# 4. EXPERIENCE BANK
+
+Create a structured experience repository.
+
+Each experience should contain:
+
+```text
+Company
+Job title
+Employment type
+Start date
+End date
+Technologies
+Responsibilities
+Achievements
+Metrics
+Projects
+Verified facts
+```
+
+Example:
+
+```json
+{
+  "company": "",
+  "role": "",
+  "technologies": [
+    "C",
+    "C++",
+    "Python",
+    "Node.js"
+  ],
+  "achievements": [
+    {
+      "text": "",
+      "metrics": [],
+      "verified": true
+    }
+  ]
+}
+```
+
+The AI can select relevant bullets from this bank.
+
+---
+
+# 5. PROJECT BANK
+
+Create a project repository.
+
+Each project should contain:
+
+* name
+* description
+* problem
+* solution
+* technologies
+* architecture
+* measurable results
+* GitHub URL
+* live URL
+* verified facts
+* relevant roles
+
+The AI should use projects selectively depending on the JD.
+
+---
+
+# 6. MASTER RESUME
+
+Allow the user to upload:
+
+* PDF
+* DOCX
+
+Parse the resume into structured data.
+
+Store:
+
+* sections
+* bullets
+* skills
+* experience
+* projects
+* education
+* links
+
+Also preserve the original uploaded resume.
+
+The user should be able to maintain multiple resume templates.
+
+Example:
+
+```text
+Master Resume
+Backend Resume
+Frontend Resume
+AI Engineer Resume
+Embedded Resume
+Full Stack Resume
+```
+
+---
+
+# 7. JOB DISCOVERY ENGINE
+
+Build a modular job-source architecture.
+
+Do NOT tightly couple the application to one website.
+
+Create:
+
+```text
+JobSource
+├── CompanyCareerSource
+├── PublicJobAPI
+├── SearchSource
+└── BrowserSource
+```
+
+Each source should normalize results into a common schema:
+
+```json
+{
+  "title": "",
+  "company": "",
+  "location": "",
+  "description": "",
+  "url": "",
+  "source": "",
+  "employment_type": "",
+  "salary_min": null,
+  "salary_max": null,
+  "experience_min": null,
+  "experience_max": null,
+  "skills": [],
+  "posted_at": null,
+  "discovered_at": null
+}
+```
+
+Support company career pages and permitted/public sources first.
+
+Do not build brittle selectors directly into business logic.
+
+Use adapters.
+
+---
+
+# 8. JOB NORMALIZATION
+
+Different websites represent the same information differently.
+
+Create a normalization layer.
+
+Normalize:
+
+* location
+* salary
+* experience
+* employment type
+* skills
+* company
+* title
+* description
+* posting date
+
+Example:
+
+```text
+"1-3 yrs"
+"1 to 3 years"
+"1+ years"
+"Experience: 1–3 years"
+
+→
+
+experience_min = 1
+experience_max = 3
+```
+
+---
+
+# 9. DUPLICATE DETECTION
+
+The same job may appear on multiple websites.
+
+Implement duplicate detection using:
+
+1. canonical URL
+2. company
+3. normalized title
+4. location
+5. description similarity
+
+Store one canonical job with multiple source references.
+
+---
+
+# 10. JOB PARSER
+
+Build an AI job-description parser.
+
+Extract:
+
+```json
+{
+  "title": "",
+  "company": "",
+  "required_skills": [],
+  "preferred_skills": [],
+  "years_experience": {
+    "min": null,
+    "max": null
+  },
+  "education_requirements": [],
+  "responsibilities": [],
+  "location": [],
+  "employment_type": "",
+  "salary": {},
+  "nice_to_have": [],
+  "keywords": [],
+  "application_questions": []
+}
+```
+
+Separate:
+
+REQUIRED
+
+from
+
+PREFERRED
+
+Do not treat every keyword equally.
+
+---
+
+# 11. JOB MATCHING ENGINE
+
+Create an explainable matching engine.
+
+Do NOT produce a mysterious AI score.
+
+Use structured components.
+
+Example:
+
+```text
+Skill Match                 30%
+Experience Match            20%
+Role Match                  15%
+Location Match              10%
+Project Relevance           10%
+Education Match              5%
+Salary Match                 5%
+Preference Match             5%
+```
+
+Make weights configurable.
+
+Output:
+
+```json
+{
+  "score": 87,
+  "breakdown": {
+    "skills": 91,
+    "experience": 100,
+    "role": 90,
+    "location": 100
+  },
+  "matched": [],
+  "missing": [],
+  "partial": [],
+  "reasons": []
+}
+```
+
+Never hide missing requirements.
+
+Example UI:
+
+```text
+87% Match
+
+✓ Node.js
+✓ PostgreSQL
+✓ REST APIs
+✓ MongoDB
+✓ 1–2 years experience
+
+△ Docker
+△ AWS
+
+✗ Kubernetes
+```
+
+---
+
+# 12. USER-CONFIGURABLE JOB FILTERS
+
+Allow:
+
+```text
+Target roles
+Locations
+Remote/hybrid/onsite
+Experience range
+Salary range
+Companies
+Industries
+Required skills
+Excluded companies
+Excluded keywords
+Employment type
+Notice period compatibility
+```
+
+Example:
+
+```text
+Roles:
+SDE-1
+Backend Engineer
+AI Engineer
+
+Locations:
+Noida
+Gurgaon
+Delhi
+Remote
+
+Experience:
+0–3 years
+```
+
+---
+
+# 13. RESUME TAILORING ENGINE
+
+This is one of the most important components.
+
+Input:
+
+```text
+Master Resume
++
+Experience Bank
++
+Project Bank
++
+Job Description
+```
+
+Output:
+
+```text
+JD-specific resume
+```
+
+Rules:
+
+1. Never invent information.
+2. Never change factual dates.
+3. Never change company names.
+4. Never fabricate metrics.
+5. Never claim a skill that isn't in the verified profile.
+6. Prefer relevant existing experience.
+7. Reorder bullets based on relevance.
+8. Use JD terminology naturally when truthful.
+9. Optimize for ATS readability.
+10. Preserve one-page formatting where possible.
+
+Every generated bullet should have provenance:
+
+```json
+{
+  "generated_text": "...",
+  "source": [
+    "experience:abc123",
+    "achievement:def456"
+  ]
+}
+```
+
+---
+
+# 14. ATS OPTIMIZATION
+
+Analyze:
+
+* keyword coverage
+* required skills
+* semantic relevance
+* formatting
+* section structure
+* readability
+
+Show:
+
+```text
+ATS Coverage: 91%
+
+Required keywords:
+8/9 covered
+
+Missing:
+AWS
+
+Potential issue:
+JD mentions Docker but resume has no verified Docker experience.
+```
+
+Do not keyword-stuff.
+
+---
+
+# 15. RESUME VERSIONING
+
+Every generated resume becomes a version.
+
+Example:
+
+```text
+Resume v17
+Target:
+Backend Engineer — XYZ
+
+Created:
+2026-09-28
+
+Based on:
+Master Resume v4
+
+JD:
+job_12983
+```
+
+Allow:
+
+* preview
+* edit
+* download PDF
+* download DOCX
+* compare versions
+* restore version
+
+---
+
+# 16. COVER LETTER GENERATOR
+
+Generate concise role-specific cover letters.
+
+Rules:
+
+* no generic AI language
+* no fake claims
+* mention only relevant experience
+* avoid excessive enthusiasm
+* keep it human
+* configurable length
+
+Default:
+
+150–250 words.
+
+---
+
+# 17. APPLICATION ANSWER ENGINE
+
+When an application asks:
+
+```text
+Why do you want to work here?
+```
+
+or
+
+```text
+Why are you a good fit?
+```
+
+generate an answer using verified profile information.
+
+For every answer store:
+
+```json
+{
+  "question": "",
+  "answer": "",
+  "sources": [],
+  "confidence": 0.94,
+  "requires_review": false
+}
+```
+
+If the question requires subjective personal information that cannot be reliably inferred, ask the user.
+
+Examples:
+
+```text
+Are you legally authorized to work in X?
+```
+
+Do not guess.
+
+Ask the user.
+
+---
+
+# 18. BROWSER AUTOMATION
+
+Use Playwright.
+
+Create:
+
+```text
+BrowserManager
+ApplicationNavigator
+FormDetector
+FieldMapper
+FormFiller
+ApplicationValidator
+SubmissionController
+```
+
+Flow:
+
+```text
+Open application URL
+        ↓
+Detect page
+        ↓
+Identify fields
+        ↓
+Map fields to profile
+        ↓
+Fill safe fields
+        ↓
+Generate answers for text questions
+        ↓
+Validate
+        ↓
+Pause for review
+        ↓
+Submit
+```
+
+---
+
+# 19. FIELD MAPPING
+
+Build semantic field detection.
+
+Examples:
+
+```text
+"Full Name"
+"Candidate Name"
+"Your Name"
+
+→ profile.name
+```
+
+```text
+"Years of Experience"
+"Total Experience"
+"Experience"
+
+→ profile.experience
+```
+
+```text
+"Expected CTC"
+"Salary Expectation"
+
+→ user.preferences.salary
+```
+
+Do not blindly map ambiguous fields.
+
+For uncertain fields:
+
+```text
+⚠ Needs confirmation
+```
+
+---
+
+# 20. CAPTCHA / BOT DETECTION
+
+If CAPTCHA appears:
+
+STOP.
+
+Show:
+
+```text
+Application paused.
+
+A verification challenge was detected.
+
+Please complete it manually.
+```
+
+Never attempt to bypass CAPTCHA.
+
+Same applies to:
+
+* bot detection
+* access restrictions
+* login challenges
+* MFA
+* rate limits
+
+---
+
+# 21. APPLICATION SAFETY CHECK
+
+Before submission show:
+
+```text
+APPLICATION REVIEW
+
+Company:
+XYZ
+
+Role:
+Backend Engineer
+
+Match:
+91%
+
+Resume:
+Backend Resume v21
+
+Questions:
+7
+Auto-filled:
+5
+Needs review:
+2
+
+Potential concerns:
+- Salary field requires confirmation
+
+[Cancel]
+[Edit]
+[Approve & Submit]
+```
+
+---
+
+# 22. APPLICATION TRACKER
+
+Track:
+
+```text
+DISCOVERED
+SHORTLISTED
+READY
+APPLIED
+OA
+INTERVIEW
+TECHNICAL
+HR
+OFFER
+REJECTED
+WITHDRAWN
+```
+
+Store timestamps for every transition.
+
+---
+
+# 23. APPLICATION EVENT LOG
+
+Every agent action must be auditable.
+
+Example:
+
+```text
+11:03
+Job discovered
+
+11:04
+JD parsed
+
+11:04
+Match score calculated: 91
+
+11:05
+Resume v21 generated
+
+11:06
+Application opened
+
+11:06
+12 fields detected
+
+11:07
+10 fields filled
+
+11:07
+2 fields require review
+
+11:09
+User approved
+
+11:09
+Application submitted
+```
+
+---
+
+# 24. AGENT RUNS
+
+Create an agent-run system.
+
+Example:
+
+```text
+Agent Run #3821
+
+Started:
+09:00
+
+Task:
+Find backend jobs in Noida/Gurgaon
+
+Jobs scanned:
+137
+
+New jobs:
+42
+
+Qualified:
+18
+
+Resume generated:
+12
+
+Applications prepared:
+9
+
+Submitted:
+5
+
+Needs review:
+4
+```
+
+Allow users to inspect failures.
+
+---
+
+# 25. SCHEDULER
+
+Implement scheduled jobs.
+
+Examples:
+
+```text
+Every day at 9 AM:
+Search new jobs
+
+Every day at 1 PM:
+Search company career pages
+
+Every evening at 7 PM:
+Prepare application batch
+```
+
+Use a queue system.
+
+Recommended:
+
+```text
+Redis
+BullMQ
+```
+
+Do not run long browser operations inside normal HTTP requests.
+
+Use background workers.
+
+---
+
+# 26. NOTIFICATIONS
+
+Add notifications for:
+
+```text
+New high-match job
+Application ready
+Human approval required
+Application failed
+Interview detected
+Job deadline approaching
+```
+
+Initially support in-app notifications.
+
+Design notification service so email/Telegram/Slack can be added later.
+
+---
+
+# 27. DASHBOARD
+
+Build a modern dashboard.
+
+Main navigation:
+
+```text
+Dashboard
+Jobs
+Applications
+Resumes
+Profile
+Experience Bank
+Projects
+Agent
+Analytics
+Settings
+```
+
+Dashboard cards:
+
+```text
+Jobs discovered
+High-match jobs
+Applications prepared
+Applications submitted
+Interviews
+Response rate
+```
+
+Job table:
+
+```text
+Company
+Role
+Location
+Match
+Source
+Posted
+Status
+Actions
+```
+
+---
+
+# 28. JOB DETAIL PAGE
+
+Display:
+
+```text
+Company
+Role
+Location
+Salary
+Experience
+Job description
+
+Match score
+
+Matched skills
+Missing skills
+Partial matches
+
+Resume version
+Cover letter
+
+Application status
+
+Agent activity
+```
+
+Actions:
+
+```text
+Tailor Resume
+Generate Cover Letter
+Prepare Application
+Open Application
+Apply
+Reject
+Save
+```
+
+---
+
+# 29. ANALYTICS
+
+Track:
+
+```text
+Applications/week
+Applications/month
+Response rate
+Interview rate
+Offer rate
+Average match score
+Best-performing resume
+Best-performing role category
+Best-performing location
+```
+
+Do not make unsupported causal claims.
+
+For example:
+
+GOOD:
+
+```text
+Resume v21 was used in 18 applications and received 3 interview invitations.
+```
+
+NOT:
+
+```text
+Resume v21 caused a 20% improvement.
+```
+
+unless sufficient controlled data exists.
+
+---
+
+# 30. AI PROVIDER ABSTRACTION
+
+Do not hard-code one AI provider.
+
+Create:
+
+```typescript
+interface AIProvider {
+  generateText(...)
+  generateStructured(...)
+  embed(...)
+}
+```
+
+Implement providers independently.
+
+Allow environment configuration:
+
+```env
+AI_PROVIDER=gemini
+```
+
+Potential providers:
+
+```text
+Gemini
+OpenAI-compatible API
+Groq
+```
+
+Do not expose API keys to the browser.
+
+---
+
+# 31. DATABASE
+
+Use PostgreSQL.
+
+Recommended entities:
+
+```text
+users
+profiles
+skills
+experiences
+achievements
+projects
+resumes
+resume_versions
+resume_sources
+
+jobs
+job_sources
+job_skills
+job_matches
+
+applications
+application_answers
+application_events
+
+agent_runs
+agent_tasks
+agent_logs
+
+notifications
+user_preferences
+automation_rules
+```
+
+Use Prisma or Drizzle.
+
+Choose one and stay consistent.
+
+---
+
+# 32. BACKEND ARCHITECTURE
+
+Prefer:
+
+```text
+apps/
+  web/
+  api/
+  worker/
+
+packages/
+  database/
+  ai/
+  resume/
+  job-engine/
+  browser/
+  shared/
+  config/
+```
+
+Architecture:
+
+```text
+Frontend
+   ↓
+API
+   ↓
+Services
+   ↓
+Queue
+   ↓
+Workers
+   ↓
+Database
+```
+
+Browser automation should run in workers.
+
+---
+
+# 33. API DESIGN
+
+Create REST APIs initially.
+
+Examples:
+
+```http
+GET /api/jobs
+GET /api/jobs/:id
+POST /api/jobs/:id/analyze
+POST /api/jobs/:id/tailor-resume
+
+GET /api/applications
+POST /api/applications
+POST /api/applications/:id/prepare
+POST /api/applications/:id/submit
+
+GET /api/resumes
+POST /api/resumes
+GET /api/resumes/:id
+
+GET /api/profile
+PUT /api/profile
+
+GET /api/agent/runs
+POST /api/agent/run
+
+GET /api/analytics
+```
+
+Validate every API input.
+
+Use typed schemas.
+
+Recommended:
+
+```text
+Zod
+```
+
+---
+
+# 34. AUTHENTICATION
+
+Implement secure authentication.
+
+Support:
+
+* email/password
+* OAuth later
+
+Use secure HTTP-only cookies for sessions.
+
+Never store secrets in localStorage.
+
+Implement:
+
+* CSRF protection where relevant
+* rate limiting
+* input validation
+* authorization checks
+* secure password hashing
+
+---
+
+# 35. SECRET MANAGEMENT
+
+Never store:
+
+* AI API keys
+* website passwords
+* session cookies
+* OAuth secrets
+
+in plaintext database fields.
+
+Use environment variables or encrypted secret storage.
+
+---
+
+# 36. ERROR HANDLING
+
+Every worker should support:
+
+```text
+retry
+timeout
+backoff
+dead-letter state
+```
+
+Example:
+
+```text
+Job scraping failed
+
+Retry:
+30 sec
+2 min
+10 min
+
+After max retries:
+FAILED
+```
+
+Never silently fail.
+
+---
+
+# 37. OBSERVABILITY
+
+Add structured logging.
+
+Every important action should include:
+
+```text
+request_id
+user_id
+job_id
+application_id
+agent_run_id
+timestamp
+event
+status
+error
+```
+
+Create an agent activity viewer.
+
+---
+
+# 38. RATE LIMITING
+
+Respect source limits.
+
+Implement per-source:
+
+```text
+request delay
+concurrency limit
+retry policy
+daily limit
+```
+
+Do not hammer websites.
+
+---
+
+# 39. UI/UX
+
+Design should be modern and minimal.
+
+Think:
+
+```text
+Linear
+Vercel
+Notion
+Raycast
+```
+
+Use:
+
+* responsive layout
+* dark/light mode
+* clean cards
+* keyboard-friendly interactions
+* command/search interface
+* useful empty states
+* loading states
+* error states
+
+Avoid excessive gradients and unnecessary animations.
+
+---
+
+# 40. JOB SEARCH COMMAND CENTER
+
+Add a natural-language command interface.
+
+Example:
+
+```text
+Find backend jobs in Gurgaon posted in the last 24 hours
+that require Node.js and PostgreSQL and accept 0–2 years experience.
+```
+
+The agent converts this into structured filters.
+
+Another example:
+
+```text
+Prepare applications for all jobs above my configured match threshold.
+```
+
+The system should show what it plans to do before executing a large batch.
+
+---
+
+# 41. BATCH APPLICATION
+
+Support:
+
+```text
+Select 10 jobs
+
+[Prepare All]
+
+↓
+
+10 resumes generated
+
+↓
+
+10 applications prepared
+
+↓
+
+User reviews batch
+
+↓
+
+[Approve Selected]
+```
+
+Never silently submit dozens of applications.
+
+Show the exact jobs being submitted.
+
+---
+
+# 42. SMART APPLICATION QUESTIONS
+
+Maintain an answer bank.
+
+Example:
+
+```text
+Question:
+Why are you interested in this role?
+
+Previous approved answer:
+...
+
+Tags:
+backend
+node
+startup
+```
+
+AI can reuse and adapt approved answers.
+
+But every generated answer must remain truthful.
+
+---
+
+# 43. LEARNING SYSTEM
+
+Do not allow uncontrolled autonomous learning.
+
+Instead, learn from explicit signals:
+
+```text
+User saves job
+User rejects job
+User edits resume
+User approves answer
+User rejects answer
+User changes preferences
+```
+
+Use these signals to improve future recommendations.
+
+Show:
+
+```text
+Why am I seeing this job?
+```
+
+with explanation.
+
+---
+
+# 44. PRIVACY
+
+The system contains sensitive career information.
+
+Implement:
+
+* encryption in transit
+* secure storage
+* least-privilege access
+* data deletion
+* export
+* audit logs
+* session management
+
+Provide:
+
+```text
+Delete my data
+Export my data
+Delete resume
+Delete application history
+```
+
+---
+
+# 45. TESTING
+
+Write tests from the beginning.
+
+Unit tests:
+
+```text
+JD parser
+Salary parser
+Experience parser
+Skill matcher
+Resume selector
+Duplicate detector
+Field mapper
+```
+
+Integration tests:
+
+```text
+Job ingestion
+JD analysis
+Resume generation
+Application preparation
+Database operations
+Queue processing
+```
+
+Browser tests:
+
+Use mocked/local test pages.
+
+Do NOT run automated testing against real job platforms unnecessarily.
+
+---
+
+# 46. MOCK APPLICATION SITE
+
+Create an internal mock application website.
+
+Example:
+
+```text
+/mock-job-site/backend-engineer
+```
+
+with:
+
+* name field
+* email
+* phone
+* experience
+* salary
+* location
+* resume upload
+* text questions
+* dropdowns
+* checkboxes
+* optional fields
+* final submit button
+
+Use this to test Playwright automation safely.
+
+---
+
+# 47. DEVELOPMENT PHASES
+
+Do NOT attempt to build the entire product in one giant code generation step.
+
+Implement in phases.
+
+## Phase 1 — Foundation
+
+Build:
+
+* monorepo
+* Next.js frontend
+* Node.js API
+* PostgreSQL
+* Prisma/Drizzle
+* authentication
+* environment configuration
+* basic dashboard
+* Docker setup
+
+Deliver a working application.
+
+---
+
+## Phase 2 — Profile & Resume
+
+Build:
+
+* profile
+* experience bank
+* project bank
+* skill bank
+* resume upload
+* resume parser
+* master resume
+* resume versioning
+
+---
+
+## Phase 3 — Job Engine
+
+Build:
+
+* job schema
+* job ingestion
+* normalization
+* deduplication
+* JD parser
+* matching engine
+* job search UI
+
+Use mock job data initially.
+
+---
+
+## Phase 4 — AI Resume Tailoring
+
+Build:
+
+* JD analysis
+* relevant experience selection
+* bullet rewriting
+* ATS analysis
+* provenance tracking
+* resume generation
+* PDF/DOCX export
+
+---
+
+## Phase 5 — Application Agent
+
+Build:
+
+* Playwright worker
+* mock application website
+* field detection
+* field mapping
+* autofill
+* application validation
+* human approval
+* submission
+
+Only after this works reliably should real supported application sources be integrated.
+
+---
+
+## Phase 6 — Agent & Scheduler
+
+Build:
+
+* BullMQ
+* Redis
+* scheduled discovery
+* agent runs
+* background workers
+* retry logic
+* notifications
+* batch processing
+
+---
+
+## Phase 7 — Analytics
+
+Build:
+
+* application funnel
+* response rates
+* interview tracking
+* resume performance
+* job source analytics
+
+---
+
+## Phase 8 — Production Hardening
+
+Implement:
+
+* security review
+* rate limiting
+* observability
+* error handling
+* data export/delete
+* backups
+* performance optimization
+* deployment
+
+---
+
+# 48. DEVELOPMENT RULES
+
+Follow these rules throughout development.
+
+1. TypeScript everywhere possible.
+2. No `any` unless absolutely necessary.
+3. Use strict TypeScript.
+4. Use environment variables for secrets.
+5. Never expose secrets to frontend.
+6. Use Zod validation.
+7. Keep business logic outside React components.
+8. Use reusable services.
+9. Avoid giant files.
+10. Write tests for important logic.
+11. Use meaningful names.
+12. Add comments only where reasoning is non-obvious.
+13. Do not over-engineer prematurely.
+14. Keep interfaces modular.
+15. Make job-source adapters replaceable.
+16. Make AI providers replaceable.
+17. Make browser automation source-specific.
+18. Log important agent actions.
+19. Every AI-generated artifact should have provenance.
+20. Never fabricate user information.
+
+---
+
+# 49. INITIAL FOLDER STRUCTURE
+
+Start with:
+
+```text
+saarthi/
+│
+├── apps/
+│   ├── web/
+│   ├── api/
+│   └── worker/
+│
+├── packages/
+│   ├── database/
+│   ├── ai/
+│   ├── resume/
+│   ├── jobs/
+│   ├── browser/
+│   ├── shared/
+│   └── config/
+│
+├── tests/
+│
+├── docker-compose.yml
+├── package.json
+├── turbo.json
+├── pnpm-workspace.yaml
+└── README.md
+```
+
+Use pnpm + Turborepo unless there is a strong reason not to.
+
+---
+
+# 50. FIRST TASK
+
+Do NOT immediately implement everything.
+
+First:
+
+1. Inspect the existing repository.
+2. Determine what already exists.
+3. Identify current architecture.
+4. Identify reusable components.
+5. Identify current database schema.
+6. Identify current authentication.
+7. Identify existing AI integrations.
+8. Identify existing resume/job functionality.
+9. Identify technical debt.
+
+Then create:
+
+```text
+docs/ARCHITECTURE.md
+docs/ROADMAP.md
+docs/DATABASE.md
+docs/AGENT.md
+docs/AUTOMATION.md
+```
+
+Also create:
+
+```text
+TODO.md
+```
+
+with tasks grouped by phase.
+
+After that, implement **Phase 1 only**.
+
+Do not rewrite existing working functionality unless necessary.
+
+---
+
+# 51. WORK STYLE
+
+Act like a senior engineer working on a real production product.
+
+Before making major architectural changes:
+
+* inspect existing code
+* understand dependencies
+* reuse existing abstractions
+* explain tradeoffs briefly
+* make small coherent changes
+
+After each phase:
+
+1. Run type checking.
+2. Run lint.
+3. Run tests.
+4. Fix failures.
+5. Update documentation.
+6. Summarize what changed.
+7. List remaining issues.
+
+Never claim something works unless you actually tested it.
+
+---
+
+# 52. DEFINITION OF DONE
+
+A feature is not complete until:
+
+```text
+Code written
++
+Types pass
++
+Lint passes
++
+Tests pass
++
+Error handling exists
++
+UI works
++
+Database migration exists
++
+Documentation updated
+```
+
+For browser automation:
+
+```text
+Mock site test passes
++
+Failure states tested
++
+CAPTCHA handling tested
++
+Human approval tested
++
+Submission state recorded
+```
+
+---
+
+# 53. FINAL PRODUCT VISION
+
+The final experience should be:
+
+User opens Saarthi.
+
+They see:
+
+```text
+Good morning.
+
+We found 37 new jobs.
+
+12 match your preferences.
+
+5 have a match above 85%.
+
+─────────────────────────────
+
+Backend Engineer
+XYZ
+Gurgaon
+
+91% Match
+
+✓ Node.js
+✓ PostgreSQL
+✓ REST APIs
+✓ 1–2 years
+
+△ AWS
+
+Resume ready.
+
+[Review Application]
+```
+
+User clicks:
+
+```text
+Review Application
+```
+
+Saarthi shows:
+
+```text
+Resume:
+Backend Engineer v21
+
+Cover Letter:
+Generated
+
+Application:
+14 fields
+
+Auto-filled:
+11
+
+Needs Review:
+3
+
+[Approve & Submit]
+```
+
+After approval:
+
+```text
+✓ Application submitted
+
+Company:
+XYZ
+
+Role:
+Backend Engineer
+
+Resume:
+Backend v21
+
+Applied:
+28 Sep 2026, 11:42 AM
+
+[View Application]
+```
+
+The application automatically enters the tracker.
+
+That is the product we are building.
+
+Start by inspecting the existing repository and producing the architecture/roadmap documents before implementing Phase 1.
