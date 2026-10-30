@@ -263,7 +263,10 @@ export class TelegramBot {
       const title = escapeHtml(app.job?.title || 'Software Engineer');
       const company = escapeHtml(app.job?.company || 'Company');
       const src = escapeHtml(app.job?.sources?.[0]?.sourceName || 'Direct');
-      return `${i + 1}. <b>${title}</b> @ ${company} <i>(${src})</i>`;
+      const rawUrl = app.job?.sources?.[0]?.sourceUrl || app.job?.canonicalUrl || '';
+      const cleanUrl = rawUrl.split('#')[0];
+      const linkHtml = cleanUrl ? ` — <a href="${escapeHtml(cleanUrl)}">🔗 Open Job</a>` : '';
+      return `${i + 1}. <b>${title}</b> @ ${company} <i>(${src})</i>${linkHtml}`;
     });
 
     const msg = [
@@ -271,7 +274,7 @@ export class TelegramBot {
       ...lines,
     ].join('\n');
 
-    await this.client.sendMessage(this.chatId, msg);
+    await this.client.sendMessage(this.chatId, msg, { disable_web_page_preview: true });
   }
 
   private async sendTopMatches(): Promise<void> {
@@ -307,7 +310,7 @@ export class TelegramBot {
 
     const lines = sorted.map(
       (j, i) =>
-        `${i + 1}. <b>${escapeHtml(j.title)}</b> @ ${escapeHtml(j.company)} (<b>${j.score}%</b> • <i>${escapeHtml(j.source)}</i>) <a href="${escapeHtml(j.url)}">↗</a>`
+        `${i + 1}. <b>${escapeHtml(j.title)}</b> @ ${escapeHtml(j.company)} (<b>${j.score}%</b> • <i>${escapeHtml(j.source)}</i>) — <a href="${escapeHtml(j.url.split('#')[0] || j.url)}">🔗 Open Job</a>`
     );
 
     const msg = [`🎯 <b>Top Unapplied Matches</b>`, ...lines].join('\n');

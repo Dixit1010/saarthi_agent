@@ -176,18 +176,22 @@ export class TelegramNotifier {
     title: string;
     company: string;
     platform: string;
+    jobUrl?: string;
     dryRun: boolean;
     isTest?: boolean;
   }): Promise<boolean> {
     if (!this.client || !this.chatId) return false;
 
+    const cleanUrl = job.jobUrl ? job.jobUrl.split('#')[0] : '';
+    const linkPart = cleanUrl ? ` — <a href="${escapeHtml(cleanUrl)}">🔗 Job Link</a>` : '';
+
     if (job.dryRun) {
-      const text = `${this.formatTestPrefix(job.isTest)}🧪 <b>Dry-Run Verified:</b> ${escapeHtml(job.title)} @ <b>${escapeHtml(job.company)}</b> <i>(${escapeHtml(job.platform)})</i>`;
-      return this.client.sendMessage(this.chatId, text);
+      const text = `${this.formatTestPrefix(job.isTest)}🧪 <b>Dry-Run Verified:</b> ${escapeHtml(job.title)} @ <b>${escapeHtml(job.company)}</b> <i>(${escapeHtml(job.platform)})</i>${linkPart}`;
+      return this.client.sendMessage(this.chatId, text, { disable_web_page_preview: true });
     }
 
-    const text = `${this.formatTestPrefix(job.isTest)}✅ <b>Applied:</b> ${escapeHtml(job.title)} @ <b>${escapeHtml(job.company)}</b> <i>(${escapeHtml(job.platform)})</i>`;
-    return this.client.sendMessage(this.chatId, text);
+    const text = `${this.formatTestPrefix(job.isTest)}✅ <b>Applied:</b> ${escapeHtml(job.title)} @ <b>${escapeHtml(job.company)}</b> <i>(${escapeHtml(job.platform)})</i>${linkPart}`;
+    return this.client.sendMessage(this.chatId, text, { disable_web_page_preview: true });
   }
 
   public async notifyApplicationSkipped(job: {

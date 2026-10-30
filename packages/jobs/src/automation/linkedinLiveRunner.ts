@@ -162,7 +162,11 @@ export class LinkedInLiveRunner {
           };
         });
 
-        const currentUrl = page.url();
+        const rawPageUrl = page.url();
+        const jobIdMatch = rawPageUrl.match(/currentJobId=(\d+)/) || rawPageUrl.match(/\/jobs\/view\/(\d+)/);
+        const currentUrl = jobIdMatch?.[1]
+          ? `https://www.linkedin.com/jobs/view/${jobIdMatch[1]}/`
+          : rawPageUrl;
         log(`Inspecting [${i + 1}/${jobCardHandles.length}]: ${details.title} at ${details.company}`);
 
         if (details.isAlreadyApplied) {
@@ -250,6 +254,7 @@ export class LinkedInLiveRunner {
                 title: details.title,
                 company: details.company,
                 platform: 'LINKEDIN',
+                jobUrl: currentUrl,
                 dryRun: true,
               });
               results.push({
@@ -287,6 +292,7 @@ export class LinkedInLiveRunner {
               title: details.title,
               company: details.company,
               platform: 'LINKEDIN',
+              jobUrl: currentUrl,
               dryRun: false,
             });
 

@@ -259,6 +259,7 @@ export class NaukriLiveRunner {
             title: card.title,
             company: card.company,
             platform: 'NAUKRI' as any,
+            jobUrl: card.href,
             dryRun,
           });
 

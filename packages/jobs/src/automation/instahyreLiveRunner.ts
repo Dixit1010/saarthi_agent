@@ -120,10 +120,34 @@ export class InstahyreLiveRunner {
               /\b(Application sent|Already applied|Under Review)\b/i.test(text) &&
               !text.includes('View job');
 
+            // Extract real Instahyre job URL from DOM anchor or AngularJS scope
+            let directJobUrl = '';
+            const jobAnchor = el.querySelector('a[href*="/job-"], a[href*="instahyre.com/job-"]') as HTMLAnchorElement | null;
+            if (jobAnchor?.href) {
+              directJobUrl = jobAnchor.href;
+            } else {
+              try {
+                const ng = (window as any).angular;
+                if (ng) {
+                  const scope = ng.element(el).scope();
+                  const opp = scope?.opp || scope?.opportunity || scope?.employer;
+                  const pubUrl = opp?.public_url || opp?.job?.public_url || opp?.share_url || opp?.url;
+                  if (pubUrl) {
+                    directJobUrl = pubUrl.startsWith('http') ? pubUrl : `https://www.instahyre.com${pubUrl}`;
+                  } else if (opp?.id || opp?.opportunity_id) {
+                    directJobUrl = `https://www.instahyre.com/candidate/opportunities/?opportunity_id=${opp.id || opp.opportunity_id}`;
+                  }
+                }
+              } catch {
+                // Fallback handled below
+              }
+            }
+
             return {
               company,
               title,
               location,
+              directJobUrl,
               fullText: text.toLowerCase(),
               isAlreadyApplied,
             };
@@ -133,7 +157,7 @@ export class InstahyreLiveRunner {
           if (seenJobKeys.has(jobKey)) continue;
           seenJobKeys.add(jobKey);
 
-          const currentUrl = page.url();
+          const currentUrl = info.directJobUrl || page.url();
           log(`Inspecting [${i + 1}/${rowCount}]: ${info.title} at ${info.company} (${info.location})`);
 
           if (info.isAlreadyApplied) {
@@ -185,6 +209,7 @@ export class InstahyreLiveRunner {
               title: info.title,
               company: info.company,
               platform: 'INSTAHYRE',
+              jobUrl: currentUrl,
               dryRun: true,
             });
             results.push({
@@ -219,6 +244,34 @@ export class InstahyreLiveRunner {
             continue;
           }
 
+          // Extract direct job URL from the open modal if not already found on card
+          const modalJobUrl = await page
+            .evaluate(() => {
+              const a = document.querySelector(
+                '.application-modal a[href*="/job-"], .modal-dialog a[href*="/job-"], a[href*="instahyre.com/job-"]'
+              ) as HTMLAnchorElement | null;
+              if (a?.href) return a.href;
+              try {
+                const ng = (window as any).angular;
+                const modalEl = document.querySelector('.application-modal, .employer-profile-modal, .modal-dialog');
+                if (ng && modalEl) {
+                  const s = ng.element(modalEl).scope();
+                  const opp = s?.opp || s?.opportunity || s?.employer || s?.currentOpportunity;
+                  const pub = opp?.public_url || opp?.job?.public_url || opp?.share_url;
+                  if (pub) return pub.startsWith('http') ? pub : `https://www.instahyre.com${pub}`;
+                  if (opp?.id || opp?.opportunity_id) {
+                    return `https://www.instahyre.com/candidate/opportunities/?opportunity_id=${opp.id || opp.opportunity_id}`;
+                  }
+                }
+              } catch {
+                // Ignore
+              }
+              return window.location.href;
+            })
+            .catch(() => '');
+
+          const resolvedJobUrl = info.directJobUrl || modalJobUrl || targetUrl;
+
           // Simulate brief human reading pause before clicking Apply inside the modal
           await HumanEmulation.sleep(1500, 2800);
           log(`Clicking "Apply" inside modal for ${info.company}...`);
@@ -248,11 +301,16 @@ export class InstahyreLiveRunner {
           appliedCount++;
           agentState.recordSubmission();
 
+          const realPostingUrl =
+            resolvedJobUrl !== targetUrl
+              ? resolvedJobUrl
+              : `${targetUrl}#${encodeURIComponent(info.company + '-' + info.title)}`;
+
           await this.recordApplicationInDb({
             title: info.title,
             company: info.company,
             location: info.location,
-            jobUrl: `${targetUrl}#${encodeURIComponent(info.company + '-' + info.title)}`,
+            jobUrl: realPostingUrl,
             platform: 'INSTAHYRE',
           });
 
@@ -260,6 +318,7 @@ export class InstahyreLiveRunner {
             title: info.title,
             company: info.company,
             platform: 'INSTAHYRE',
+            jobUrl: resolvedJobUrl,
             dryRun: false,
           });
 

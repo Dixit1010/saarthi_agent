@@ -240,6 +240,7 @@ export class HiringCafeLiveRunner {
           title: cand.title,
           company: cand.company,
           platform: 'HIRING_CAFE' as any,
+          jobUrl: cand.url,
           dryRun,
         });
 
