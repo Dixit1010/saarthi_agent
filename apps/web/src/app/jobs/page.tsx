@@ -260,8 +260,15 @@ export default function JobsPage() {
       }).catch(() => {});
       setAgentPaused(false);
     }
+    const istNow = new Date().toLocaleTimeString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
     setLiveApplying(true);
-    setLiveLogs([`[${new Date().toISOString().slice(11, 19)}] Launching Autonomous Live Runner...`]);
+    setLiveLogs([`[${istNow} IST] Launching Autonomous Live Runner...`]);
     const activeNames = ALL_AGENT_PLATFORMS.filter((p) => enabledPlatforms[p.id]).map((p) => p.label).join(', ');
     setSyncMessage(`🚀 Autonomous Live Job Runner running in Chrome ONLY for enabled platforms: [${activeNames}]...`);
     try {

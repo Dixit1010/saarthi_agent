@@ -469,8 +469,15 @@ export function ApplicationReviewModal({
                       </div>
                       <p className="text-zinc-600 dark:text-zinc-400">{evt.description}</p>
                     </div>
-                    <span className="text-[10px] text-zinc-400 whitespace-nowrap">
-                      {new Date(evt.createdAt).toLocaleString()}
+                    <span className="text-[10px] text-zinc-400 whitespace-nowrap" suppressHydrationWarning>
+                      {new Date(evt.createdAt).toLocaleString('en-IN', {
+                        timeZone: 'Asia/Kolkata',
+                        day: '2-digit',
+                        month: 'short',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}{' '}
+                      IST
                     </span>
                   </div>
                 ))}

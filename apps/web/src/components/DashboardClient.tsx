@@ -150,7 +150,8 @@ export function DashboardClient({
                             month: 'short',
                             hour: '2-digit',
                             minute: '2-digit',
-                          })}
+                          })}{' '}
+                          IST
                         </span>
                       </>
                     )}

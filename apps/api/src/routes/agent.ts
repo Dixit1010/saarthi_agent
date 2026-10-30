@@ -117,6 +117,15 @@ export async function agentRoutes(app: FastifyInstance) {
     });
   });
 
+  const getIstTimeStr = () =>
+    new Date().toLocaleTimeString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+
   // POST Configure Groq API Key for Job Application Q&A
   app.post('/groq-key', async (req: FastifyRequest<{ Body?: { apiKey?: string } }>, reply: FastifyReply) => {
     const apiKey = req.body?.apiKey?.trim() || '';
@@ -125,7 +134,7 @@ export async function agentRoutes(app: FastifyInstance) {
     }
     process.env.GROQ_API_KEY = apiKey;
     process.env.AI_PROVIDER = 'groq';
-    agentState.appendLiveLog(`[${new Date().toISOString().slice(11, 19)}] 🧠 Groq AI API Key configured (llama-3.3-70b-versatile active for application Q&A).`);
+    agentState.appendLiveLog(`[${getIstTimeStr()} IST] 🧠 Groq AI API Key configured (openai/gpt-oss-120b active for application Q&A).`);
     return reply.send({ success: true, hasGroqKey: true });
   });
 
@@ -134,10 +143,10 @@ export async function agentRoutes(app: FastifyInstance) {
     const targetPaused = req.body?.paused ?? !agentState.isPaused();
     if (targetPaused) {
       agentState.pause();
-      agentState.appendLiveLog(`[${new Date().toISOString().slice(11, 19)}] ⏸️ Agent PAUSED by user.`);
+      agentState.appendLiveLog(`[${getIstTimeStr()} IST] ⏸️ Agent PAUSED by user.`);
     } else {
       agentState.resume();
-      agentState.appendLiveLog(`[${new Date().toISOString().slice(11, 19)}] ▶️ Agent RESUMED by user.`);
+      agentState.appendLiveLog(`[${getIstTimeStr()} IST] ▶️ Agent RESUMED by user.`);
     }
     return reply.send({ isPaused: agentState.isPaused() });
   });

@@ -27,7 +27,14 @@ export class SubmissionController {
   static async executeAutoApply(options: AutoApplyExecutionOptions): Promise<AutoApplyExecutionResult> {
     const logs: string[] = [];
     const log = (msg: string) => {
-      logs.push(`[${new Date().toISOString().slice(11, 19)}] ${msg}`);
+      const istTime = new Date().toLocaleTimeString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+      logs.push(`[${istTime} IST] ${msg}`);
     };
 
     const browserManager = new BrowserManager();

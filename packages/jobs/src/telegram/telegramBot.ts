@@ -265,8 +265,17 @@ export class TelegramBot {
       const src = escapeHtml(app.job?.sources?.[0]?.sourceName || 'Direct');
       const rawUrl = app.job?.sources?.[0]?.sourceUrl || app.job?.canonicalUrl || '';
       const cleanUrl = rawUrl.split('#')[0];
+      const timeIst = app.appliedAt
+        ? ` • ${new Date(app.appliedAt).toLocaleString('en-IN', {
+            timeZone: 'Asia/Kolkata',
+            day: '2-digit',
+            month: 'short',
+            hour: '2-digit',
+            minute: '2-digit',
+          })} IST`
+        : '';
       const linkHtml = cleanUrl ? ` — <a href="${escapeHtml(cleanUrl)}">🔗 Open Job</a>` : '';
-      return `${i + 1}. <b>${title}</b> @ ${company} <i>(${src})</i>${linkHtml}`;
+      return `${i + 1}. <b>${title}</b> @ ${company} <i>(${src}${timeIst})</i>${linkHtml}`;
     });
 
     const msg = [

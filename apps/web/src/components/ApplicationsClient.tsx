@@ -37,13 +37,13 @@ export function mapApiApplications(rawApps: any[]): TrackedApplication[] {
     status: a.status || 'APPLIED',
     submissionMethod: a.submissionMethod,
     appliedDate: a.appliedAt
-      ? new Date(a.appliedAt).toLocaleString('en-IN', {
+      ? `${new Date(a.appliedAt).toLocaleString('en-IN', {
           timeZone: 'Asia/Kolkata',
           day: '2-digit',
           month: 'short',
           hour: '2-digit',
           minute: '2-digit',
-        })
+        })} IST`
       : undefined,
     notes: a.notes || `Applied via ${a.submissionMethod || 'Saarthi Agent'}`,
     answersCount: a.answersCount || 0,

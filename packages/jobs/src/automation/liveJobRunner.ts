@@ -50,7 +50,14 @@ export class LiveJobRunner {
 
     const logs: string[] = [];
     const log = (msg: string) => {
-      const entry = `[${new Date().toISOString().slice(11, 19)}] ${msg}`;
+      const istTime = new Date().toLocaleTimeString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+      const entry = `[${istTime} IST] ${msg}`;
       logs.push(entry);
       agentState.appendLiveLog(entry);
       console.log(entry);

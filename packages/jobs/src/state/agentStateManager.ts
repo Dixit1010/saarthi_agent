@@ -1,6 +1,20 @@
 import { AgentStatusSnapshot } from '@saarthi/shared';
 import { getAgentConfig } from '../configLoader.js';
 
+function getCurrentIstDateString(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+}
+
+export function formatIstTime(date: Date = new Date()): string {
+  return date.toLocaleTimeString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
 export class AgentStateManager {
   private static instance: AgentStateManager | null = null;
 
@@ -10,7 +24,7 @@ export class AgentStateManager {
   private queueSizeGetter: () => number = () => 0;
   private pendingApprovalsGetter: () => number = () => 0;
   private appliedToday: number = 0;
-  private lastResetDay: string = new Date().toISOString().slice(0, 10);
+  private lastResetDay: string = getCurrentIstDateString();
   private liveLogs: string[] = [];
 
   private constructor() {}
@@ -76,7 +90,7 @@ export class AgentStateManager {
   }
 
   private checkDayRollover(): void {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getCurrentIstDateString();
     if (today !== this.lastResetDay) {
       this.appliedToday = 0;
       this.lastResetDay = today;
