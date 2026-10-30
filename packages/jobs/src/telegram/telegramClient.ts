@@ -149,6 +149,21 @@ export class TelegramClient {
       return false;
     }
   }
+
+  public async setMyCommands(commands: Array<{ command: string; description: string }>): Promise<boolean> {
+    const url = `${this.baseUrl}/setMyCommands`;
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ commands }),
+      });
+      const data = (await res.json()) as { ok: boolean };
+      return data.ok;
+    } catch {
+      return false;
+    }
+  }
 }
 
 export function escapeHtml(text: string): string {

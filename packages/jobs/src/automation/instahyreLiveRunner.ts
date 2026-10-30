@@ -179,14 +179,6 @@ export class InstahyreLiveRunner {
             continue;
           }
 
-          void telegramNotifier.notifyJobFound({
-            title: info.title,
-            company: info.company,
-            matchScore: 84,
-            jobUrl: currentUrl,
-            platform: 'INSTAHYRE',
-          });
-
           if (dryRun) {
             log(`[DRY RUN] Would open and click Apply for ${info.company} (${info.title}).`);
             void telegramNotifier.notifyApplicationSubmitted({

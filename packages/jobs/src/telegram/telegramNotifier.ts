@@ -18,7 +18,7 @@ export class TelegramNotifier {
 
   // Notification deduplication store: key -> timestamp
   private recentNotificationKeys = new Map<string, number>();
-  private dedupWindowMs = 15000; // 15s window to ignore identical rapid-fire alerts
+  private dedupWindowMs = 15000;
 
   private constructor() {
     this.refreshCredentials();
@@ -52,7 +52,6 @@ export class TelegramNotifier {
     const now = Date.now();
     const lastSent = this.recentNotificationKeys.get(key);
     if (lastSent && now - lastSent < this.dedupWindowMs) {
-      console.log(`[TelegramNotifier] Deduplicated alert for "${key}". Suppressing duplicate.`);
       return false;
     }
     this.recentNotificationKeys.set(key, now);
@@ -63,12 +62,8 @@ export class TelegramNotifier {
     this.recentNotificationKeys.clear();
   }
 
-  private formatTestHeader(isTest?: boolean): string {
-    return isTest ? '🧪 <b>[DUMMY TEST]</b>\n' : '';
-  }
-
-  private formatTestFooter(isTest?: boolean): string {
-    return isTest ? '\n<i>(Simulated synthetic test data — zero live actions taken)</i>' : '';
+  private formatTestPrefix(isTest?: boolean): string {
+    return isTest ? '🧪 <b>[TEST]</b> ' : '';
   }
 
   public async notifyScanStarted(platforms: string[], dryRun: boolean, isTest?: boolean): Promise<boolean> {
@@ -76,16 +71,8 @@ export class TelegramNotifier {
     const dedupKey = `scan_start:${platforms.join(',')}:${dryRun}:${Boolean(isTest)}`;
     if (!this.checkAndRecordDedup(dedupKey)) return false;
 
-    const modeBadge = dryRun ? '🧪 <i>[DRY-RUN MODE]</i>' : '⚡ <i>[LIVE AUTO-APPLY]</i>';
-    const text = [
-      `${this.formatTestHeader(isTest)}🔍 <b>Job Scan Started</b>`,
-      `<b>Platforms:</b> ${escapeHtml(platforms.join(', '))}`,
-      `<b>Mode:</b> ${modeBadge}`,
-      `<b>Time:</b> ${new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' })} IST`,
-      this.formatTestFooter(isTest),
-    ]
-      .filter(Boolean)
-      .join('\n');
+    const modeTag = dryRun ? '🧪 Dry-Run' : '⚡ Live';
+    const text = `${this.formatTestPrefix(isTest)}🔍 <b>Scan Started</b> • ${escapeHtml(platforms.join(', '))} <i>(${modeTag})</i>`;
 
     return this.client.sendMessage(this.chatId, text);
   }
@@ -100,18 +87,12 @@ export class TelegramNotifier {
   }): Promise<boolean> {
     if (!this.client || !this.chatId) return false;
     const durationSec = Math.round(summary.durationMs / 1000);
-    const actionLabel = summary.dryRun ? 'Verified (Dry-Run)' : 'Submitted (Live)';
+    const label = summary.dryRun ? 'Verified' : 'Applied';
 
     const text = [
-      `${this.formatTestHeader(summary.isTest)}🏁 <b>Job Scan Completed</b>`,
-      `• <b>Scanned:</b> ${summary.totalScanned}`,
-      `• <b>${actionLabel}:</b> ${summary.totalApplied}`,
-      `• <b>Skipped / Filtered:</b> ${summary.totalSkipped}`,
-      `• <b>Duration:</b> ${durationSec}s`,
-      this.formatTestFooter(summary.isTest),
-    ]
-      .filter(Boolean)
-      .join('\n');
+      `${this.formatTestPrefix(summary.isTest)}🏁 <b>Run Complete (${durationSec}s)</b>`,
+      `✅ <b>${label}: ${summary.totalApplied}</b>  •  ⏭️ Skipped: ${summary.totalSkipped}  •  🔎 Scanned: ${summary.totalScanned}`,
+    ].join('\n');
 
     return this.client.sendMessage(this.chatId, text);
   }
@@ -128,19 +109,8 @@ export class TelegramNotifier {
     const dedupKey = `job_found:${job.company}:${job.title}:${Boolean(job.isTest)}`;
     if (!this.checkAndRecordDedup(dedupKey)) return false;
 
-    const scoreEmoji = job.matchScore >= 80 ? '🟢' : job.matchScore >= 65 ? '🟡' : '⚪';
-
-    const text = [
-      `${this.formatTestHeader(job.isTest)}🎯 <b>New Qualified Job Match</b>`,
-      `<b>Role:</b> ${escapeHtml(job.title)}`,
-      `<b>Company:</b> ${escapeHtml(job.company)}`,
-      `<b>Match Score:</b> ${scoreEmoji} ${job.matchScore}%`,
-      job.platform ? `<b>Platform:</b> ${escapeHtml(job.platform)}` : '',
-      `<b>Link:</b> <a href="${escapeHtml(job.jobUrl)}">Open Posting</a>`,
-      this.formatTestFooter(job.isTest),
-    ]
-      .filter(Boolean)
-      .join('\n');
+    const plat = job.platform ? ` <i>(${escapeHtml(job.platform)})</i>` : '';
+    const text = `${this.formatTestPrefix(job.isTest)}🎯 <b>${escapeHtml(job.title)}</b> @ <b>${escapeHtml(job.company)}</b> (${job.matchScore}%)${plat} — <a href="${escapeHtml(job.jobUrl)}">View</a>`;
 
     return this.client.sendMessage(this.chatId, text, { disable_web_page_preview: true });
   }
@@ -156,17 +126,8 @@ export class TelegramNotifier {
     const dedupKey = `job_queued:${job.company}:${job.title}:${Boolean(job.isTest)}`;
     if (!this.checkAndRecordDedup(dedupKey)) return false;
 
-    const text = [
-      `${this.formatTestHeader(job.isTest)}⏳ <b>Application Queued for Processing</b>`,
-      `<b>Role:</b> ${escapeHtml(job.title)}`,
-      `<b>Company:</b> ${escapeHtml(job.company)}`,
-      job.matchScore ? `<b>Match Score:</b> ${job.matchScore}%` : '',
-      job.queuePosition ? `<b>Queue Position:</b> #${job.queuePosition}` : '',
-      `Agent worker will initiate profile tailoring and field inspection.`,
-      this.formatTestFooter(job.isTest),
-    ]
-      .filter(Boolean)
-      .join('\n');
+    const score = job.matchScore ? ` (${job.matchScore}%)` : '';
+    const text = `${this.formatTestPrefix(job.isTest)}⏳ <b>Queued:</b> ${escapeHtml(job.title)} @ <b>${escapeHtml(job.company)}</b>${score}`;
 
     return this.client.sendMessage(this.chatId, text);
   }
@@ -183,16 +144,7 @@ export class TelegramNotifier {
     const dedupKey = `app_prep:${job.company}:${job.title}:${Boolean(job.isTest)}`;
     if (!this.checkAndRecordDedup(dedupKey)) return false;
 
-    const text = [
-      `${this.formatTestHeader(job.isTest)}📝 <b>Application Prepared</b>`,
-      `<b>Role:</b> ${escapeHtml(job.title)}`,
-      `<b>Company:</b> ${escapeHtml(job.company)}`,
-      `<b>Match Score:</b> ${job.matchScore}%`,
-      `Answers mapped and tailored. Ready for review or manual submission.`,
-      this.formatTestFooter(job.isTest),
-    ]
-      .filter(Boolean)
-      .join('\n');
+    const text = `${this.formatTestPrefix(job.isTest)}📝 <b>Ready:</b> ${escapeHtml(job.title)} @ <b>${escapeHtml(job.company)}</b> (${job.matchScore}%)`;
 
     return this.client.sendMessage(this.chatId, text);
   }
@@ -200,25 +152,11 @@ export class TelegramNotifier {
   public async notifyApprovalRequired(request: PendingApproval, isTest?: boolean): Promise<boolean> {
     if (!this.client || !this.chatId) return false;
     const remainingMins = Math.max(1, Math.round((request.expiresAt - Date.now()) / 60000));
-    const modeNote = request.dryRun
-      ? `<i>Note: Dry-run is enabled. Approval will perform inspection without submitting.</i>`
-      : `<i>Warning: Live apply is enabled. Approval will proceed with submission!</i>`;
 
     const text = [
-      `${this.formatTestHeader(isTest)}⚠️ <b>Approval Required</b>`,
-      `<b>Role:</b> ${escapeHtml(request.title)}`,
-      `<b>Company:</b> ${escapeHtml(request.company)}`,
-      `<b>Match Score:</b> ${request.matchScore}%`,
-      `<b>Expires in:</b> ${remainingMins} minutes`,
-      modeNote,
-      ``,
-      `Click an option below or reply:`,
-      `<code>/approve ${request.jobId}</code>`,
-      `<code>/reject ${request.jobId}</code>`,
-      this.formatTestFooter(isTest),
-    ]
-      .filter(Boolean)
-      .join('\n');
+      `${this.formatTestPrefix(isTest)}⚠️ <b>Approve Application?</b> <i>(${remainingMins}m left)</i>`,
+      `<b>${escapeHtml(request.title)}</b> @ <b>${escapeHtml(request.company)}</b> (${request.matchScore}%)`,
+    ].join('\n');
 
     const inlineKeyboard = {
       inline_keyboard: [
@@ -243,31 +181,12 @@ export class TelegramNotifier {
   }): Promise<boolean> {
     if (!this.client || !this.chatId) return false;
 
-    // Strictly distinguish dry run vs live submission
     if (job.dryRun) {
-      const text = [
-        `${this.formatTestHeader(job.isTest)}🧪 <b>Dry-Run Completed (Not Submitted)</b>`,
-        `<b>Role:</b> ${escapeHtml(job.title)}`,
-        `<b>Company:</b> ${escapeHtml(job.company)}`,
-        `<b>Platform:</b> ${escapeHtml(job.platform)}`,
-        `All form fields and answers verified. Submission button was not pressed.`,
-        this.formatTestFooter(job.isTest),
-      ]
-        .filter(Boolean)
-        .join('\n');
+      const text = `${this.formatTestPrefix(job.isTest)}🧪 <b>Dry-Run Verified:</b> ${escapeHtml(job.title)} @ <b>${escapeHtml(job.company)}</b> <i>(${escapeHtml(job.platform)})</i>`;
       return this.client.sendMessage(this.chatId, text);
     }
 
-    const text = [
-      `${this.formatTestHeader(job.isTest)}🚀 <b>Live Application Submitted!</b>`,
-      `<b>Role:</b> ${escapeHtml(job.title)}`,
-      `<b>Company:</b> ${escapeHtml(job.company)}`,
-      `<b>Platform:</b> ${escapeHtml(job.platform)}`,
-      `Submission confirmed by site.`,
-      this.formatTestFooter(job.isTest),
-    ]
-      .filter(Boolean)
-      .join('\n');
+    const text = `${this.formatTestPrefix(job.isTest)}✅ <b>Applied:</b> ${escapeHtml(job.title)} @ <b>${escapeHtml(job.company)}</b> <i>(${escapeHtml(job.platform)})</i>`;
     return this.client.sendMessage(this.chatId, text);
   }
 
@@ -279,17 +198,7 @@ export class TelegramNotifier {
     isTest?: boolean;
   }): Promise<boolean> {
     if (!this.client || !this.chatId) return false;
-    const text = [
-      `${this.formatTestHeader(job.isTest)}⏭️ <b>Application Skipped / Filtered</b>`,
-      `<b>Role:</b> ${escapeHtml(job.title)}`,
-      `<b>Company:</b> ${escapeHtml(job.company)}`,
-      job.platform ? `<b>Platform:</b> ${escapeHtml(job.platform)}` : '',
-      `<b>Reason:</b> ${escapeHtml(job.reason)}`,
-      this.formatTestFooter(job.isTest),
-    ]
-      .filter(Boolean)
-      .join('\n');
-
+    const text = `${this.formatTestPrefix(job.isTest)}⏭️ <b>Skipped:</b> ${escapeHtml(job.title)} @ <b>${escapeHtml(job.company)}</b> — <i>${escapeHtml(job.reason)}</i>`;
     return this.client.sendMessage(this.chatId, text);
   }
 
@@ -301,17 +210,7 @@ export class TelegramNotifier {
     isTest?: boolean;
   }): Promise<boolean> {
     if (!this.client || !this.chatId) return false;
-    const text = [
-      `${this.formatTestHeader(job.isTest)}❌ <b>Application Submission Failed</b>`,
-      `<b>Role:</b> ${escapeHtml(job.title)}`,
-      `<b>Company:</b> ${escapeHtml(job.company)}`,
-      job.platform ? `<b>Platform:</b> ${escapeHtml(job.platform)}` : '',
-      `<b>Error:</b> ${escapeHtml(job.reason)}`,
-      this.formatTestFooter(job.isTest),
-    ]
-      .filter(Boolean)
-      .join('\n');
-
+    const text = `${this.formatTestPrefix(job.isTest)}❌ <b>Failed:</b> ${escapeHtml(job.title)} @ <b>${escapeHtml(job.company)}</b> — <i>${escapeHtml(job.reason)}</i>`;
     return this.client.sendMessage(this.chatId, text);
   }
 
@@ -323,18 +222,7 @@ export class TelegramNotifier {
     isTest?: boolean;
   }): Promise<boolean> {
     if (!this.client || !this.chatId) return false;
-    const text = [
-      `${this.formatTestHeader(job.isTest)}❓ <b>Submission Outcome Unknown</b>`,
-      `<b>Role:</b> ${escapeHtml(job.title)}`,
-      `<b>Company:</b> ${escapeHtml(job.company)}`,
-      job.platform ? `<b>Platform:</b> ${escapeHtml(job.platform)}` : '',
-      `<b>Status:</b> ${escapeHtml(job.reason || 'Portal session closed without definitive confirmation')}`,
-      `Please check your email or portal dashboard directly.`,
-      this.formatTestFooter(job.isTest),
-    ]
-      .filter(Boolean)
-      .join('\n');
-
+    const text = `${this.formatTestPrefix(job.isTest)}❓ <b>Unconfirmed:</b> ${escapeHtml(job.title)} @ <b>${escapeHtml(job.company)}</b> — <i>${escapeHtml(job.reason || 'Check portal directly')}</i>`;
     return this.client.sendMessage(this.chatId, text);
   }
 
@@ -345,17 +233,7 @@ export class TelegramNotifier {
     isTest?: boolean
   ): Promise<boolean> {
     if (!this.client || !this.chatId) return false;
-    const text = [
-      `${this.formatTestHeader(isTest)}🔐 <b>Manual Action Required on Laptop</b>`,
-      `<b>Platform:</b> ${escapeHtml(platform)}`,
-      `<b>Alert:</b> ${escapeHtml(reason)}`,
-      `Please switch to the visible browser window on your computer to complete verification / 2FA.`,
-      `<b>Window open for:</b> ${timeoutSeconds}s`,
-      this.formatTestFooter(isTest),
-    ]
-      .filter(Boolean)
-      .join('\n');
-
+    const text = `${this.formatTestPrefix(isTest)}🔐 <b>Action Required (${escapeHtml(platform)}):</b> ${escapeHtml(reason)} <i>(${timeoutSeconds}s window on laptop)</i>`;
     return this.client.sendMessage(this.chatId, text);
   }
 
@@ -372,18 +250,9 @@ export class TelegramNotifier {
     const dateStr = summary.date || new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' });
 
     const text = [
-      `${this.formatTestHeader(summary.isTest)}📊 <b>Saarthi Daily Agent Summary</b>`,
-      `<b>Date:</b> ${escapeHtml(dateStr)}`,
-      ``,
-      `• <b>Jobs Scanned:</b> ${summary.scanned}`,
-      `• <b>Applications Prepared:</b> ${summary.prepared}`,
-      `• <b>Successfully Submitted:</b> ${summary.submitted}`,
-      `• <b>Failed / Skipped:</b> ${summary.failed}`,
-      `• <b>Pending Review:</b> ${summary.pendingReview}`,
-      this.formatTestFooter(summary.isTest),
-    ]
-      .filter(Boolean)
-      .join('\n');
+      `${this.formatTestPrefix(summary.isTest)}📊 <b>Daily Summary (${escapeHtml(dateStr)})</b>`,
+      `✅ Applied: <b>${summary.submitted}</b>  •  📝 Ready: ${summary.prepared}  •  ⏭️ Skipped: ${summary.failed}  •  🔎 Scanned: ${summary.scanned}`,
+    ].join('\n');
 
     return this.client.sendMessage(this.chatId, text);
   }

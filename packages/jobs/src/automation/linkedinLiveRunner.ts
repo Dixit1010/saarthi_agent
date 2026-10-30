@@ -210,13 +210,6 @@ export class LinkedInLiveRunner {
         }
 
         log(`Clicking "Easy Apply" with natural human cursor movement...`);
-        void telegramNotifier.notifyJobFound({
-          title: details.title,
-          company: details.company,
-          matchScore: 85,
-          jobUrl: currentUrl,
-          platform: 'LINKEDIN',
-        });
         await HumanEmulation.naturalClick(page, applyBtn);
         await HumanEmulation.sleep(2000, 3500);
 
