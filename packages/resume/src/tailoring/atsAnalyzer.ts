@@ -1,4 +1,4 @@
-﻿import { AtsReport, AtsKeywordMatch, TailoredResume } from './types.js';
+import { AtsReport, AtsKeywordMatch, TailoredResume } from './types.js';
 
 export interface AtsAnalysisInput {
   resume: TailoredResume;
@@ -48,6 +48,9 @@ export function analyzeAts(input: AtsAnalysisInput): AtsReport {
   // If none supplied, extract common tech keywords from JD
   if (reqList.length === 0 && prefList.length === 0) {
     const techPatterns = [
+      'Embedded C', 'C++', 'C99', 'Firmware', 'Microcontroller', 'Renesas', 'RL78',
+      'UART', 'I2C', 'SPI', 'ADC', 'Delta-Sigma ADC', 'DLMS', 'COSEM', 'IEC 1107',
+      'EEPROM', 'Flash', 'RTC', 'Watchdog', 'GPIO', 'LCD', 'CRC', 'AES', 'SonarQube',
       'JavaScript', 'TypeScript', 'Node.js', 'Python', 'React', 'Next.js', 'PostgreSQL',
       'SQL', 'MongoDB', 'Docker', 'Kubernetes', 'AWS', 'GCP', 'Azure', 'Git', 'CI/CD',
       'GraphQL', 'REST', 'Microservices', 'FastAPI', 'Redis', 'Kafka', 'Linux'

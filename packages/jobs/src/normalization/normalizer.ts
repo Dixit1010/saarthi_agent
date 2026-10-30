@@ -131,7 +131,10 @@ export function detectEmploymentType(
 
 export function extractCommonSkills(text: string): string[] {
   const skillList = [
-    'Node.js', 'TypeScript', 'JavaScript', 'Python', 'Go', 'Rust', 'Java', 'C++',
+    'Embedded C', 'C++', 'C99', 'C', 'Firmware', 'Microcontroller', 'Renesas RL78', 'Bare-Metal',
+    'UART', 'I2C', 'SPI', 'ADC', 'Delta-Sigma ADC', 'DLMS/COSEM', 'IEC 1107', 'EEPROM', 'Flash',
+    'RTC', 'Watchdog', 'GPIO', 'LCD', 'CRC', 'AES', 'SonarQube', 'Git',
+    'Node.js', 'TypeScript', 'JavaScript', 'Python', 'Go', 'Rust', 'Java',
     'PostgreSQL', 'MySQL', 'MongoDB', 'Redis', 'Kafka', 'RabbitMQ', 'Elasticsearch',
     'Docker', 'Kubernetes', 'AWS', 'GCP', 'Azure', 'Linux', 'CI/CD',
     'React', 'Next.js', 'Vue', 'Angular', 'Tailwind CSS', 'GraphQL', 'REST APIs',

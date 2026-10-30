@@ -75,7 +75,7 @@ export function calculateJobMatch(
   }
 
   // 3. Role Match (15%)
-  const isEngineeringRole = /\b(engineer|developer|sde|programmer|architect|devops|sre|full[\s-]?stack|backend|back-end|frontend|front-end)\b/.test(jobTitleLower);
+  const isEngineeringRole = /\b(engineer|developer|sde|programmer|architect|devops|sre|full[\s-]?stack|backend|back-end|frontend|front-end|firmware|embedded|microcontroller)\b/.test(jobTitleLower);
   let roleScore = isEngineeringRole ? 60 : 10;
   for (const role of candidate.targetRoles) {
     const roleTokens = role

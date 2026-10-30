@@ -1,4 +1,4 @@
-﻿import {
+import {
   ResumeTailoringInput,
   TailoredResume,
   TailoredExperience,
@@ -138,10 +138,14 @@ export async function tailorResume(input: ResumeTailoringInput): Promise<Tailore
 
   // 5. Targeted Summary
   // Generate a truthful, targeted professional summary reflecting user's actual profile + target job
-  let targetedSummary = profile.bio || `Results-driven software engineer specializing in scalable systems, clean architecture, and modern full-stack development.`;
-  
-  // Try AI provider if available to refine summary without fabricating
-  try {
+  const isEmbeddedOrCppRole = /\b(embedded|firmware|microcontroller|mcu|rl78|renesas|c\+\+|bare[\s-]?metal|driver|uart|i2c|spi|adc|dlms|cosem|metering|eeprom|rtos)\b/i.test(jdText);
+
+  let targetedSummary = isEmbeddedOrCppRole
+    ? `Embedded Firmware Engineer with 1.8 years of experience developing bare-metal firmware for Renesas RL78/I1C-based single-phase smart energy meters. Skilled in Embedded C, peripheral integration, DLMS/COSEM communication, EEPROM and flash storage, energy metrology, AES security, tamper detection, RTC, datalogging, relay control, and production firmware releases. Experienced with Renesas CS+, CC-RL compiler, Git, SonarQube, and hardware-oriented debugging.`
+    : (profile.bio || `Results-driven software engineer specializing in scalable systems, clean architecture, and modern full-stack development.`);
+
+  // Try AI provider if available to refine summary without fabricating (unless Embedded/Firmware summary is already locked)
+  if (!isEmbeddedOrCppRole) try {
     const ai = createAIProvider();
     if (ai) {
       const summaryPrompt = `
