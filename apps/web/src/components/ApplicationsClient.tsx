@@ -38,6 +38,7 @@ export function mapApiApplications(rawApps: any[]): TrackedApplication[] {
     submissionMethod: a.submissionMethod,
     appliedDate: a.appliedAt
       ? new Date(a.appliedAt).toLocaleString('en-IN', {
+          timeZone: 'Asia/Kolkata',
           day: '2-digit',
           month: 'short',
           hour: '2-digit',

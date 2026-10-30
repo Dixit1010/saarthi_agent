@@ -143,8 +143,9 @@ export function DashboardClient({
                     {app.appliedAt && (
                       <>
                         <span>•</span>
-                        <span>
+                        <span suppressHydrationWarning>
                           {new Date(app.appliedAt).toLocaleString('en-IN', {
+                            timeZone: 'Asia/Kolkata',
                             day: '2-digit',
                             month: 'short',
                             hour: '2-digit',
