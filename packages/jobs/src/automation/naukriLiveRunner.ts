@@ -53,37 +53,62 @@ export class NaukriLiveRunner {
         timeout: 25000,
       })
       .catch(() => {});
-    await page.waitForTimeout(3500);
+    await page.waitForTimeout(4000);
 
-    // Check if login is required on Naukri
-    const isLoginWall = await page
-      .evaluate(() => {
-        const url = window.location.href;
-        const hasLoginLayer =
-          document.querySelector('#usernameField, input[placeholder*="Email ID" i], .login-layer') !==
-          null;
-        return url.includes('/nlogin') || hasLoginLayer;
-      })
-      .catch(() => false);
+    // Accurate check for whether the browser session is logged into Naukri
+    const checkIsLoggedOut = async (targetPage: Page): Promise<boolean> => {
+      return targetPage
+        .evaluate(() => {
+          const url = window.location.href;
+          const hasLoginBtn =
+            document.querySelector(
+              '#login_Layer, a[title="Jobseeker Login"], #usernameField, input[placeholder*="Email ID" i], #login-apply-button, .login-layer'
+            ) !== null;
+          const isLoggedOutHome =
+            url === 'https://www.naukri.com/' ||
+            url.includes('/nlogin') ||
+            (!url.includes('/mnjuser') && hasLoginBtn);
+          return isLoggedOutHome || hasLoginBtn;
+        })
+        .catch(() => false);
+    };
 
-    if (isLoginWall) {
+    if (await checkIsLoggedOut(page)) {
+      log('Opening Naukri login page (https://www.naukri.com/nlogin/login)...');
+      await page
+        .goto('https://www.naukri.com/nlogin/login', {
+          waitUntil: 'domcontentloaded',
+          timeout: 20000,
+        })
+        .catch(() => {});
+      await page.waitForTimeout(2000);
+
       log(
-        `🔐 Naukri login required! Please log into Naukri in the open Chrome window (waiting up to ${manualAuthTimeoutSeconds}s)...`
+        `🔐 Naukri login required! Please log into Naukri.com in the open Chrome window on your laptop (waiting up to ${manualAuthTimeoutSeconds}s)...`
       );
+      void telegramNotifier.notifySecurityChallenge(
+        'NAUKRI',
+        'Please log into Naukri.com in the open Chrome window on your laptop (1-time setup — cookies will be saved).',
+        manualAuthTimeoutSeconds
+      );
+
       const startWait = Date.now();
       while (Date.now() - startWait < manualAuthTimeoutSeconds * 1000) {
         await page.waitForTimeout(3000);
-        const stillLogin = await page
+        const loggedIn = await page
           .evaluate(() => {
             const url = window.location.href;
             return (
-              url.includes('/nlogin') ||
-              document.querySelector('#usernameField, input[placeholder*="Email ID" i]') !== null
+              url.includes('/mnjuser') &&
+              !url.includes('/nlogin') &&
+              document.querySelector('#usernameField') === null
             );
           })
           .catch(() => false);
-        if (!stillLogin) {
-          log('✅ Naukri login verified! Proceeding with job applications...');
+
+        if (loggedIn) {
+          log('✅ Naukri login verified! Session saved to persistent profile. Proceeding...');
+          await page.waitForTimeout(2500);
           break;
         }
       }
@@ -92,12 +117,14 @@ export class NaukriLiveRunner {
     let appliedCount = 0;
     const seenJobUrls = new Set<string>();
 
+    // Target Embedded, C++, Firmware, and Backend engineering feeds on Naukri
     const searchUrls = [
       'https://www.naukri.com/mnjuser/recommendedjobs',
-      'https://www.naukri.com/software-engineer-jobs?experience=2',
+      'https://www.naukri.com/embedded-c-jobs?experience=2',
+      'https://www.naukri.com/embedded-firmware-engineer-jobs?experience=2',
       'https://www.naukri.com/c-plus-plus-developer-jobs?experience=2',
-      'https://www.naukri.com/backend-developer-jobs?experience=2',
       'https://www.naukri.com/embedded-software-engineer-jobs?experience=2',
+      'https://www.naukri.com/backend-developer-jobs?experience=2',
     ];
 
     for (const searchUrl of searchUrls) {
@@ -106,15 +133,19 @@ export class NaukriLiveRunner {
       if (page.url() !== searchUrl) {
         log(`Opening Naukri feed: ${searchUrl}`);
         await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => {});
-        await page.waitForTimeout(3500);
+        await page.waitForTimeout(4500);
       }
+
+      // Scroll slightly so lazy-rendered job tuples appear
+      await page.mouse.wheel(0, 500).catch(() => {});
+      await page.waitForTimeout(1200);
 
       // Extract job links from Naukri SRP / Recommended cards
       const jobCards = await page
         .evaluate(() => {
           const cards = Array.from(
             document.querySelectorAll(
-              '.srp-jobtuple-wrapper, article.jobTuple, div.cust-job-tuple, div.tuple, a.title'
+              '.srp-jobtuple-wrapper, article.jobTuple, div.cust-job-tuple, div.tuple, div[class*="jobTuple" i], a.title'
             )
           );
           const list: Array<{ title: string; company: string; location: string; href: string }> = [];
@@ -123,7 +154,7 @@ export class NaukriLiveRunner {
             const titleEl =
               c.tagName.toLowerCase() === 'a'
                 ? (c as HTMLAnchorElement)
-                : (c.querySelector('a.title, .title, h2 a, p.title') as HTMLAnchorElement | null);
+                : (c.querySelector('a.title, .title a, h2 a, p.title, a[href*="job-listings"]') as HTMLAnchorElement | null);
             const compEl = c.querySelector('a.comp-name, .comp-name, .subTitle, .companyInfo');
             const locEl = c.querySelector('.locWdth, .loc, .location');
 
@@ -162,17 +193,68 @@ export class NaukriLiveRunner {
         try {
           log(`Inspecting Naukri job: ${card.company} — ${card.title}`);
           await jobPage.goto(card.href, { waitUntil: 'domcontentloaded', timeout: 22000 }).catch(() => {});
-          await jobPage.waitForTimeout(2500);
 
-          // Skip if it says "Apply on company site" (external redirect) when we want 1-click / Naukri apply
+          // Wait up to 6s for Naukri's React SPA job header buttons to render
+          await jobPage
+            .waitForSelector(
+              '#apply-button, button#apply-button, button.apply-button, #login-apply-button, #company-site-button, .apply-button-container button, span.already-applied',
+              { timeout: 6000 }
+            )
+            .catch(() => {});
+          await jobPage.waitForTimeout(1000);
+
+          const pageButtonState = await jobPage
+            .evaluate(() => {
+              if (document.querySelector('#login-apply-button')) return 'LOGIN_REQUIRED';
+              if (
+                document.querySelector('#company-site-button') ||
+                Array.from(document.querySelectorAll('button')).some((b) =>
+                  /company site/i.test(b.textContent || '')
+                )
+              ) {
+                return 'EXTERNAL_COMPANY_SITE';
+              }
+              if (
+                document.querySelector('#already-applied, .already-applied') ||
+                Array.from(document.querySelectorAll('span, button, div')).some((el) =>
+                  /^applied$/i.test((el.textContent || '').trim())
+                )
+              ) {
+                return 'ALREADY_APPLIED';
+              }
+              const directBtn = document.querySelector(
+                '#apply-button, button#apply-button, button.apply-button, .apply-button-container button'
+              );
+              if (directBtn) return 'DIRECT_APPLY';
+              return 'UNKNOWN';
+            })
+            .catch(() => 'UNKNOWN');
+
+          if (pageButtonState === 'LOGIN_REQUIRED') {
+            log(
+              `⚠️ Naukri session is not logged in yet ("Login to apply" button shown). Clicking Login to apply — please sign in once in the browser window!`
+            );
+            const loginApplyBtn = await jobPage.$('#login-apply-button').catch(() => null);
+            if (loginApplyBtn) {
+              await loginApplyBtn.click().catch(() => {});
+              await jobPage.waitForTimeout(15000);
+            }
+          } else if (pageButtonState === 'EXTERNAL_COMPANY_SITE') {
+            log(`Skipping ${card.company}: Redirects to external company portal ("Apply on company site").`);
+            continue;
+          } else if (pageButtonState === 'ALREADY_APPLIED') {
+            log(`Skipping ${card.company}: Already applied on Naukri.`);
+            continue;
+          }
+
           const applyBtn = await jobPage
             .$(
-              '#apply-button, button#apply-button, button.apply-button, button:has-text("Apply"):not(:has-text("company site"))'
+              '#apply-button, button#apply-button, button.apply-button, .apply-button-container button:has-text("Apply"):not(:has-text("company site")):not(:has-text("Login"))'
             )
             .catch(() => null);
 
           if (!applyBtn || !(await applyBtn.isVisible().catch(() => false))) {
-            log(`No direct Naukri Apply button for ${card.company} (likely already applied or external).`);
+            log(`No direct 1-click Naukri Apply button for ${card.company} (state: ${pageButtonState}).`);
             continue;
           }
 
@@ -196,21 +278,26 @@ export class NaukriLiveRunner {
 
               if (!chatbotQuestion) break;
 
+              log(`Answering Naukri Chatbot question: "${chatbotQuestion.slice(0, 80)}..."`);
+
               // Check if radio buttons are present in Naukri chatbot
-              const radioLabel = await jobPage
-                .$('.ssrc__radio-btn-container label, .chatbot_Drawer label')
-                .catch(() => null);
-              if (radioLabel && (await radioLabel.isVisible().catch(() => false))) {
-                await radioLabel.click().catch(() => {});
+              const radioLabels = await jobPage
+                .$$('.ssrc__radio-btn-container label, .chatbot_Drawer label')
+                .catch(() => []);
+              if (radioLabels.length > 0) {
+                await radioLabels[0]?.click().catch(() => {});
               } else {
                 // Check for text input in Naukri chatbot
                 const chatInput = await jobPage
                   .$(
-                    '.chatbot_Drawer input[type="text"], .chatbot_Drawer textarea, div[contenteditable="true"]'
+                    '.chatbot_Drawer input[type="text"], .chatbot_Drawer textarea, div[contenteditable="true"], .textArea'
                   )
                   .catch(() => null);
                 if (chatInput && (await chatInput.isVisible().catch(() => false))) {
-                  let answer = resolveQuestionAnswer(chatbotQuestion).answer;
+                  let answer = resolveQuestionAnswer(chatbotQuestion, {
+                    jobTitle: card.title,
+                    company: card.company,
+                  }).answer;
                   if (process.env.GROQ_API_KEY) {
                     const groqAns = await generateGroqApplicationAnswer({
                       question: chatbotQuestion,
@@ -233,7 +320,7 @@ export class NaukriLiveRunner {
 
               const saveNextBtn = await jobPage
                 .$(
-                  '.sendMsg, button:has-text("Save"), button:has-text("Next"), button:has-text("Submit")'
+                  '.sendMsg, button:has-text("Save"), button:has-text("Next"), button:has-text("Submit"), div.sendMsgbtn'
                 )
                 .catch(() => null);
               if (saveNextBtn && (await saveNextBtn.isVisible().catch(() => false))) {
@@ -309,7 +396,7 @@ export class NaukriLiveRunner {
           description: `Live job applied on Naukri.com via Saarthi autonomous runner.`,
           sources: {
             create: {
-              sourceName: 'naukri',
+              sourceName: 'Naukri.com',
               sourceUrl: data.jobUrl,
               externalId: `naukri_${Date.now()}`,
             },
