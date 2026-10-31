@@ -47,7 +47,7 @@ export class BrowserManager {
     // 1. On Windows, connect to (or launch via interactive Scheduled Task) the visible taskbar Chrome on CDP port 9222
     if (usePersistent && process.platform === 'win32') {
       try {
-        this.browser = await chromium.connectOverCDP('http://127.0.0.1:9222', { timeout: 2500 });
+        this.browser = await chromium.connectOverCDP('http://127.0.0.1:9222', { timeout: 15000 });
         this.context = this.browser.contexts()[0] || null;
         if (this.context) {
           this.isCdpConnected = true;
@@ -66,7 +66,7 @@ export class BrowserManager {
             );
             execSync(`schtasks /Run /TN "SaarthiVisibleBrowser"`, { stdio: 'ignore' });
             await new Promise((r) => setTimeout(r, 3500));
-            this.browser = await chromium.connectOverCDP('http://127.0.0.1:9222', { timeout: 5000 });
+            this.browser = await chromium.connectOverCDP('http://127.0.0.1:9222', { timeout: 15000 });
             this.context = this.browser.contexts()[0] || null;
             if (this.context) {
               this.isCdpConnected = true;
@@ -189,6 +189,12 @@ export class BrowserManager {
     // Inject authenticated platform session cookies (LinkedIn li_at / Instahyre sessionid)
     await this.injectSessionCookies();
 
+    const allPages = this.context.pages();
+    for (const p of allPages) {
+      if (p.url().includes('accounts.google.com/gsi')) {
+        await p.close().catch(() => {});
+      }
+    }
     const pages = this.context.pages().filter((p) => !p.url().includes('accounts.google.com/gsi'));
     const resolvedPage = pages.length > 0 && pages[0] ? pages[0] : await this.context.newPage();
     await resolvedPage.bringToFront().catch(() => {});
@@ -230,7 +236,11 @@ export class BrowserManager {
     const existingCookies = await this.context
       .cookies(['https://www.linkedin.com', 'https://www.instahyre.com'])
       .catch(() => []);
-    const hasExistingLiAt = existingCookies.some((c) => c.name === 'li_at' && c.value);
+    const existingLiAt = existingCookies.find((c) => c.name === 'li_at' && c.value);
+    if (existingLiAt?.value) {
+      process.env.LINKEDIN_LI_AT = existingLiAt.value;
+    }
+    const hasExistingLiAt = Boolean(existingLiAt);
     const hasExistingInstaSession = existingCookies.some((c) => c.name === 'sessionid' && c.value);
 
     const cookiesToAdd: Array<{
