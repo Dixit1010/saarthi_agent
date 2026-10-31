@@ -307,6 +307,21 @@ export class NaukriLiveRunner {
             .catch(() => {});
           await HumanEmulation.sleep(1500, 2500);
 
+          // Enrich real company name from the Naukri JD header if fallback card had generic 'Naukri Employer'
+          if (card.company === 'Naukri Employer' || card.company === 'Company') {
+            const realComp = await jobPage
+              .evaluate(() => {
+                const el = document.querySelector(
+                  '[class*="jd-header-comp-name"] a, .jd-header-comp-name a, a[href*="company-jobs"]'
+                );
+                return (el?.textContent || '').replace(/\s+/g, ' ').trim();
+              })
+              .catch(() => '');
+            if (realComp) {
+              card.company = realComp;
+            }
+          }
+
           const pageButtonState = await jobPage
             .evaluate(() => {
               if (document.querySelector('#login-apply-button')) return 'LOGIN_REQUIRED';
@@ -623,16 +638,16 @@ export class NaukriLiveRunner {
   }
 
   /**
-   * Enforces a mandatory ~2-minute (120s to 138s with organic random jitter) cooldown gap
+   * Enforces a 60-second (60s to 66s with organic random jitter) cooldown gap
    * between every Naukri application submission to prevent velocity/bot activity detection.
    */
   private static async waitTwoMinutesBetweenApplications(
     page: Page,
     log: (msg: string) => void
   ): Promise<void> {
-    const totalSeconds = HumanEmulation.randomBetween(120, 138);
+    const totalSeconds = HumanEmulation.randomBetween(60, 66);
     log(
-      `⏳ Anti-Bot Cooldown: Waiting ${Math.floor(totalSeconds / 60)}m ${totalSeconds % 60}s (${totalSeconds}s) before next Naukri application to prevent bot activity detection...`
+      `⏳ Anti-Bot Cooldown: Waiting ${totalSeconds}s (~60s) before next Naukri application to prevent bot activity detection...`
     );
 
     for (let elapsed = 0; elapsed < totalSeconds; elapsed++) {
@@ -641,18 +656,18 @@ export class NaukriLiveRunner {
         return;
       }
 
-      if (elapsed === 60) {
+      if (elapsed === 30) {
         log(`⏳ Anti-Bot Cooldown: ${totalSeconds - elapsed}s remaining before next Naukri application...`);
       }
 
-      if (elapsed > 0 && elapsed % 30 === 0) {
+      if (elapsed > 0 && elapsed % 20 === 0) {
         await HumanEmulation.jiggleMouse(page);
       }
 
       await new Promise((r) => setTimeout(r, 1000));
     }
 
-    log('✅ 2-minute anti-bot cooldown complete. Proceeding to next Naukri job...');
+    log('✅ 60-second anti-bot cooldown complete. Proceeding to next Naukri job...');
   }
 
   /**
