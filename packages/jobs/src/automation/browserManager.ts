@@ -2,6 +2,7 @@ import { chromium, Browser, BrowserContext, Page } from 'playwright';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';
+import { execSync } from 'child_process';
 
 export interface BrowserManagerOptions {
   headless?: boolean;
@@ -28,6 +29,7 @@ export class BrowserManager {
   private browser: Browser | null = null;
   private context: BrowserContext | null = null;
   private activePage: Page | null = null;
+  private isCdpConnected: boolean = false;
 
   async init(options: BrowserManagerOptions = {}): Promise<Page> {
     const headless = options.headless ?? true;
@@ -42,6 +44,41 @@ export class BrowserManager {
       fs.mkdirSync(profileDir, { recursive: true });
     }
 
+    // 1. On Windows, connect to (or launch via interactive Scheduled Task) the visible taskbar Chrome on CDP port 9222
+    if (usePersistent && process.platform === 'win32') {
+      try {
+        this.browser = await chromium.connectOverCDP('http://127.0.0.1:9222', { timeout: 2500 });
+        this.context = this.browser.contexts()[0] || null;
+        if (this.context) {
+          this.isCdpConnected = true;
+          console.log('[BrowserManager] Connected to visible taskbar Chrome session on CDP port 9222.');
+        }
+      } catch {
+        if (!headless) {
+          try {
+            const saarthiDir = path.dirname(profileDir);
+            const batPath = path.join(saarthiDir, 'launch_visible_chrome.bat');
+            const batContent = `@echo off\r\n"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --remote-debugging-port=9222 --user-data-dir="${profileDir}" --no-first-run --no-default-browser-check --disable-blink-features=AutomationControlled --start-maximized "https://www.linkedin.com/feed/"\r\n`;
+            fs.writeFileSync(batPath, batContent, 'utf8');
+            execSync(
+              `schtasks /Create /TN "SaarthiVisibleBrowser" /TR "${batPath}" /SC ONCE /ST 00:00 /IT /F`,
+              { stdio: 'ignore' }
+            );
+            execSync(`schtasks /Run /TN "SaarthiVisibleBrowser"`, { stdio: 'ignore' });
+            await new Promise((r) => setTimeout(r, 3500));
+            this.browser = await chromium.connectOverCDP('http://127.0.0.1:9222', { timeout: 5000 });
+            this.context = this.browser.contexts()[0] || null;
+            if (this.context) {
+              this.isCdpConnected = true;
+              console.log('[BrowserManager] Launched & connected to visible taskbar Chrome on CDP port 9222.');
+            }
+          } catch (cdpErr: any) {
+            console.warn(`[BrowserManager] Interactive taskbar Chrome launch warning: ${cdpErr.message}`);
+          }
+        }
+      }
+    }
+
     const commonArgs = [
       '--disable-blink-features=AutomationControlled',
       '--no-sandbox',
@@ -49,7 +86,7 @@ export class BrowserManager {
       ...(headless ? [] : ['--start-maximized']),
     ];
 
-    if (usePersistent) {
+    if (usePersistent && !this.context) {
       const channelsToTry: Array<string | undefined> = [
         options.channel || 'chrome',
         'msedge',
@@ -152,7 +189,7 @@ export class BrowserManager {
     // Inject authenticated platform session cookies (LinkedIn li_at / Instahyre sessionid)
     await this.injectSessionCookies();
 
-    const pages = this.context.pages();
+    const pages = this.context.pages().filter((p) => !p.url().includes('accounts.google.com/gsi'));
     const resolvedPage = pages.length > 0 && pages[0] ? pages[0] : await this.context.newPage();
     await resolvedPage.bringToFront().catch(() => {});
     this.activePage = resolvedPage;
@@ -265,14 +302,17 @@ export class BrowserManager {
 
   async close(): Promise<void> {
     try {
-      if (this.context) await this.context.close();
-      if (this.browser) await this.browser.close();
+      if (!this.isCdpConnected) {
+        if (this.context) await this.context.close();
+        if (this.browser) await this.browser.close();
+      }
     } catch {
       // Ignored
     } finally {
       this.activePage = null;
       this.context = null;
       this.browser = null;
+      this.isCdpConnected = false;
     }
   }
 }
