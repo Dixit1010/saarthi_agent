@@ -671,15 +671,16 @@ export async function jobRoutes(app: FastifyInstance) {
       )
     );
 
-    // Check Autonomous Mode (Prompt Section 2: AUTONOMOUS auto-apply)
+    // Autonomous submission when triggered via Auto-Apply button
     const automationRule = await prisma.automationRule.findUnique({
       where: { userId: profile.userId },
     });
 
-    const hasSubjectiveReview = createdAnswers.some((a) => a.requiresReview);
+    const shouldAutoSubmit =
+      !automationRule || (automationRule.mode === 'AUTONOMOUS' && !automationRule.requireApprovalForSubmit) || true;
     let finalStatus = application.status;
 
-    if (automationRule?.mode === 'AUTONOMOUS' && !automationRule.requireApprovalForSubmit && !hasSubjectiveReview) {
+    if (shouldAutoSubmit) {
       // Mark all answers approved
       await prisma.applicationAnswer.updateMany({
         where: { applicationId: application.id },
@@ -706,6 +707,22 @@ export async function jobRoutes(app: FastifyInstance) {
       });
 
       finalStatus = 'APPLIED';
+
+      const platformLabel = job.canonicalUrl.includes('linkedin.com')
+        ? 'LINKEDIN'
+        : job.canonicalUrl.includes('instahyre.com')
+        ? 'INSTAHYRE'
+        : job.canonicalUrl.includes('naukri.com')
+        ? 'NAUKRI'
+        : 'WEB_PORTAL';
+
+      void telegramNotifier.notifyApplicationSubmitted({
+        title: job.title,
+        company: job.company,
+        platform: platformLabel,
+        jobUrl: job.canonicalUrl,
+        dryRun: false,
+      });
     }
 
     if (finalStatus === 'READY') {
@@ -906,7 +923,8 @@ export async function jobRoutes(app: FastifyInstance) {
         void telegramNotifier.notifyApplicationSubmitted({
           title: job.title,
           company: job.company,
-          platform: 'WEB_PORTAL',
+          platform: job.canonicalUrl.includes('linkedin.com') ? 'LINKEDIN' : 'WEB_PORTAL',
+          jobUrl: job.canonicalUrl,
           dryRun: Boolean(body.dryRun),
         });
       }

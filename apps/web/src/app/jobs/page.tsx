@@ -247,10 +247,37 @@ export default function JobsPage() {
     }
   };
 
+  const mapEcosystemTabToKey = (tabId: string): AgentPlatformKey | null => {
+    switch (tabId) {
+      case 'LinkedIn':
+        return 'LINKEDIN';
+      case 'Instahyre':
+        return 'INSTAHYRE';
+      case 'HiringCafe':
+        return 'HIRING_CAFE';
+      case 'Naukri':
+        return 'NAUKRI';
+      case 'Amazon':
+        return 'AMAZON';
+      case 'Siemens':
+        return 'SIEMENS';
+      default:
+        return null;
+    }
+  };
+
   const handleLiveApply = async () => {
-    if (activePlatformList.length === 0) {
+    const focusedKey = mapEcosystemTabToKey(selectedPlatform);
+    const platformsToRun: AgentPlatformKey[] = focusedKey
+      ? [focusedKey]
+      : activePlatformList;
+
+    if (platformsToRun.length === 0) {
       setSyncMessage('⚠️ All platform toggles are OFF! Please toggle ON at least one platform (e.g. Instahyre or LinkedIn) before running the agent.');
       return;
+    }
+    if (focusedKey && !enabledPlatforms[focusedKey]) {
+      updatePlatformToggles({ ...enabledPlatforms, [focusedKey]: true });
     }
     if (agentPaused) {
       await fetch('/api/agent/toggle-pause', {
@@ -269,14 +296,14 @@ export default function JobsPage() {
     });
     setLiveApplying(true);
     setLiveLogs([`[${istNow} IST] Launching Autonomous Live Runner...`]);
-    const activeNames = ALL_AGENT_PLATFORMS.filter((p) => enabledPlatforms[p.id]).map((p) => p.label).join(', ');
+    const activeNames = ALL_AGENT_PLATFORMS.filter((p) => platformsToRun.includes(p.id)).map((p) => p.label).join(', ');
     setSyncMessage(`🚀 Autonomous Live Job Runner running in Chrome ONLY for enabled platforms: [${activeNames}]...`);
     try {
       const res = await fetch('/api/agent/live-apply', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          platforms: activePlatformList,
+          platforms: platformsToRun,
           headless: false,
           dryRun: false,
         }),
@@ -368,7 +395,7 @@ export default function JobsPage() {
   };
 
   const filteredJobs = jobs.filter((j) => {
-    if (!isJobAllowedByToggles(j)) return false;
+    if (selectedPlatform === 'ALL' && !isJobAllowedByToggles(j)) return false;
 
     const matchesSearch =
       searchTerm === '' ||
@@ -413,6 +440,7 @@ export default function JobsPage() {
             message: `✨ Autonomously Applied to ${job.company} (${job.title})! Tailored LaTeX resume attached and verified answers submitted.`,
             type: 'success',
           });
+          void fetchJobs();
         } else {
           setReviewJob(job);
         }
@@ -823,7 +851,13 @@ export default function JobsPage() {
           return (
             <button
               key={plat.id}
-              onClick={() => setSelectedPlatform(plat.id)}
+              onClick={() => {
+                setSelectedPlatform(plat.id);
+                const mappedKey = mapEcosystemTabToKey(plat.id);
+                if (mappedKey && !enabledPlatforms[mappedKey]) {
+                  updatePlatformToggles({ ...enabledPlatforms, [mappedKey]: true });
+                }
+              }}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
                 isSelected
                   ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 font-semibold shadow-xs'

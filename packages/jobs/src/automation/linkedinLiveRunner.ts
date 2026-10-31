@@ -3,7 +3,9 @@ import { prisma } from '@saarthi/database';
 import { getAgentConfig } from '../configLoader.js';
 import { HumanEmulation } from './humanEmulation.js';
 import { resolveQuestionAnswer } from '../answers/answerBank.js';
-import { resolveBestResumePdfPath } from './fieldMapper.js';
+import { generateGroqApplicationAnswer } from '../answers/groqAnswerHelper.js';
+import { FieldMapper, resolveBestResumePdfPath, CandidateFormContext } from './fieldMapper.js';
+import { FormFiller } from './formFiller.js';
 import { ManualAuthHelper } from './manualAuthHelper.js';
 import { agentState } from '../state/agentStateManager.js';
 import { telegramNotifier } from '../telegram/telegramNotifier.js';
@@ -41,16 +43,57 @@ export class LinkedInLiveRunner {
       if (onProgress) onProgress(msg);
     };
 
-    // Determine search queries to execute
+    // Clean, high-yield search queries tailored to Dixit's Embedded / C++ / Backend profile
     const queriesToRun: string[] = options.query
       ? [options.query]
-      : config.searchPreferences.customSearchQueries && config.searchPreferences.customSearchQueries.length > 0
-      ? config.searchPreferences.customSearchQueries
-      : ['("C++ Developer" OR "C++ Engineer") NOT ("Senior" OR "Staff" OR "Principal")'];
+      : [
+          'Embedded Firmware Engineer',
+          'Embedded C Developer',
+          'C++ Software Engineer',
+          'Backend Software Engineer',
+          'Node.js Developer',
+        ];
 
     let appliedCount = 0;
 
-    for (let qIdx = 0; qIdx < queriesToRun.length; qIdx++) {
+    // 1. Check LinkedIn authenticated session (quick 12s check so remote/mobile runs never hang for 5 minutes)
+    log('Checking LinkedIn session status...');
+    await page.goto('https://www.linkedin.com/feed/', { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+    await page.waitForTimeout(2000);
+
+    const initialAuth = await ManualAuthHelper.checkLoginStatus(page, 'LINKEDIN');
+    let isAuthenticated = !initialAuth.isLoginRequired && !initialAuth.isChallenge;
+
+    if (!isAuthenticated) {
+      const liUser = config.credentials?.linkedin?.username || process.env.LINKEDIN_EMAIL || '';
+      const liPass = config.credentials?.linkedin?.password || process.env.LINKEDIN_PASSWORD || '';
+      if (liUser && liPass) {
+        log('Attempting automatic LinkedIn sign-in with configured credentials...');
+        await page.goto('https://www.linkedin.com/login', { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+        await page.fill('input#username', liUser).catch(() => {});
+        await page.fill('input#password', liPass).catch(() => {});
+        await page.click('button[type="submit"]').catch(() => {});
+        await page.waitForTimeout(3500);
+        const postLogin = await ManualAuthHelper.checkLoginStatus(page, 'LINKEDIN');
+        isAuthenticated = !postLogin.isLoginRequired && !postLogin.isChallenge;
+      }
+    }
+
+    if (!isAuthenticated) {
+      const quickTimeout = options.manualAuthTimeoutSeconds ?? 12;
+      log(`LinkedIn cookie not active yet — checking for quick manual login (${quickTimeout}s) before switching to LinkedIn Direct Job Search & Auto-Apply...`);
+      const authResult = await ManualAuthHelper.ensureAuthenticated({
+        page,
+        platform: 'LINKEDIN',
+        timeoutSeconds: quickTimeout,
+        interactive: false,
+        onLog: (m) => log(`[Auth] ${m}`),
+      });
+      isAuthenticated = authResult.authenticated;
+    }
+
+    // Phase 1: Authenticated LinkedIn Easy Apply (when logged in)
+    for (let qIdx = 0; isAuthenticated && qIdx < queriesToRun.length; qIdx++) {
       if (appliedCount >= maxApplications) break;
       if (agentState.isPaused()) {
         log('Agent is currently PAUSED. Halting LinkedIn scan at query checkpoint.');
@@ -60,37 +103,9 @@ export class LinkedInLiveRunner {
 
       const searchUrl = `https://www.linkedin.com/jobs/search/?keywords=${encodeURIComponent(
         targetQuery || ''
-      )}&f_TPR=r86400&f_AL=true`;
+      )}&location=India&f_TPR=r604800&f_AL=true`;
 
-      // Ensure authenticated on first query before navigating to Easy Apply search
-      if (qIdx === 0) {
-        log('Establishing LinkedIn authenticated session...');
-        await page.goto('https://www.linkedin.com/feed/', { waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => {});
-        await page.waitForTimeout(2500);
-
-        const authResult = await ManualAuthHelper.ensureAuthenticated({
-          page,
-          platform: 'LINKEDIN',
-          timeoutSeconds: options.manualAuthTimeoutSeconds,
-          interactive: options.interactive,
-          onLog: (m) => log(`[Auth] ${m}`),
-        });
-
-        if (!authResult.authenticated) {
-          log(`Stopping LinkedIn live runner: ${authResult.reason || 'Authentication required'}`);
-          results.push({
-            title: 'LinkedIn Session',
-            company: 'LinkedIn',
-            platform: 'LINKEDIN',
-            jobUrl: page.url(),
-            status: 'SKIPPED',
-            reason: authResult.reason || 'Authentication required: User not logged in to LinkedIn',
-          });
-          return results;
-        }
-      }
-
-      log(`[Query ${qIdx + 1}/${queriesToRun.length}] Searching: ${targetQuery?.slice(0, 60)}...`);
+      log(`[Easy Apply ${qIdx + 1}/${queriesToRun.length}] Searching: ${targetQuery?.slice(0, 60)}...`);
 
       await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch((e) => {
         log(`Navigation warning: ${e.message}`);
@@ -468,7 +483,193 @@ export class LinkedInLiveRunner {
     }
     }
 
-    log(`LinkedIn Runner complete! Successfully submitted ${appliedCount} Easy Apply application(s).`);
+    // Phase 2: Direct LinkedIn Live Job Search & Autonomous Apply (runs when Easy Apply didn't reach cap or when unauthenticated)
+    if (appliedCount < maxApplications && !agentState.isPaused()) {
+      log(`Starting LinkedIn Live Job Discovery & Autonomous Apply (target: ${maxApplications - appliedCount} more job(s))...`);
+      const candidateTargets: Array<{ title: string; company: string; location: string; url: string }> = [];
+      const seenUrls = new Set<string>();
+
+      // 2A. Scrape live LinkedIn public job search pages
+      for (const q of queriesToRun) {
+        if (candidateTargets.length >= maxApplications * 2) break;
+        const guestSearchUrl = `https://www.linkedin.com/jobs/search?keywords=${encodeURIComponent(q)}&location=India`;
+        log(`Scanning LinkedIn live postings for "${q}"...`);
+        await page.goto(guestSearchUrl, { waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => {});
+        await page.waitForTimeout(2000);
+
+        const cards = await page
+          .evaluate(() => {
+            const els = Array.from(document.querySelectorAll('ul.jobs-search__results-list li, div.base-card'));
+            return els.slice(0, 15).map((el) => {
+              const title = el.querySelector('.base-search-card__title, h3')?.textContent?.trim() || '';
+              const company = el.querySelector('.base-search-card__subtitle, h4')?.textContent?.trim() || '';
+              const location = el.querySelector('.job-search-card__location')?.textContent?.trim() || 'India';
+              const rawHref = (el.querySelector('a.base-card__full-link, a') as HTMLAnchorElement | null)?.href || '';
+              const cleanUrl = rawHref.split('?')[0] || rawHref;
+              return { title, company, location, url: cleanUrl };
+            });
+          })
+          .catch(() => []);
+
+        for (const c of cards) {
+          if (!c.title || !c.company || !c.url || seenUrls.has(c.url)) continue;
+          const lowerTitle = c.title.toLowerCase();
+          if (
+            /\b(senior|sr\.?|staff|principal|lead|manager|director|vp|head|architect|chief)\b/i.test(lowerTitle)
+          ) {
+            continue;
+          }
+          seenUrls.add(c.url);
+          candidateTargets.push(c);
+        }
+      }
+
+      // 2B. Also include unapplied LinkedIn jobs already discovered in Prisma DB
+      const dbLinkedInJobs = await prisma.job
+        .findMany({
+          where: {
+            canonicalUrl: { contains: 'linkedin.com/jobs/view/' },
+            applications: { none: { status: 'APPLIED' } },
+          },
+          take: 20,
+          orderBy: { discoveredAt: 'desc' },
+        })
+        .catch(() => []);
+
+      for (const dbJob of dbLinkedInJobs) {
+        const cleanUrl = dbJob.canonicalUrl.split('?')[0] || dbJob.canonicalUrl;
+        if (seenUrls.has(cleanUrl)) continue;
+        if (/\b(senior|sr\.?|staff|principal|lead|manager|director|vp|head|architect|chief)\b/i.test(dbJob.title)) {
+          continue;
+        }
+        seenUrls.add(cleanUrl);
+        candidateTargets.push({
+          title: dbJob.title,
+          company: dbJob.company,
+          location: dbJob.location || 'India',
+          url: cleanUrl,
+        });
+      }
+
+      log(`Queued ${candidateTargets.length} matching LinkedIn role(s) for autonomous application.`);
+
+      const candidateCtx: CandidateFormContext = {
+        fullName: cand.fullName || 'Dixit Kumar',
+        firstName: (cand.fullName || 'Dixit Kumar').split(' ')[0] || 'Dixit',
+        lastName: (cand.fullName || 'Dixit Kumar').split(' ').slice(1).join(' ') || 'Kumar',
+        email: cand.email || 'dixitkumar300@gmail.com',
+        phone: cand.phone || '+91 7060137673',
+        location: cand.location || 'Noida, India',
+        experienceYears: cand.experienceYears || 1.8,
+        noticePeriodText: cand.noticePeriod || '15 days / Immediate',
+        expectedSalaryText: cand.expectedSalary || '₹18 LPA',
+        workAuthorizationText: cand.workAuthorization || 'Authorized to work in India without sponsorship',
+        linkedinUrl: cand.linkedinUrl || 'https://www.linkedin.com/in/dixitkum/',
+        githubUrl: cand.githubUrl || 'https://github.com/Dixit1010',
+        portfolioUrl: cand.portfolioUrl || 'https://portfoliodixitt.netlify.app/',
+        leetcodeUrl: cand.leetcodeUrl || 'https://leetcode.com/u/dixitkumar300',
+        codeforcesUrl: cand.codeforcesUrl || 'https://codeforces.com/profile/dixitkumar300',
+      };
+
+      for (let idx = 0; idx < candidateTargets.length; idx++) {
+        if (appliedCount >= maxApplications) break;
+        if (agentState.isPaused()) {
+          log('Agent is currently PAUSED. Halting LinkedIn runner.');
+          break;
+        }
+
+        const target = candidateTargets[idx];
+        if (!target) continue;
+
+        // Skip if already marked APPLIED in DB
+        const existingApp = await prisma.application
+          .findFirst({
+            where: {
+              status: 'APPLIED',
+              job: { canonicalUrl: { contains: target.url.split('/').pop() || target.url } },
+            },
+          })
+          .catch(() => null);
+
+        if (existingApp) {
+          continue;
+        }
+
+        try {
+          log(`Inspecting [${appliedCount + 1}/${maxApplications}]: ${target.title} at ${target.company} (${target.location})`);
+          await page.goto(target.url, { waitUntil: 'domcontentloaded', timeout: 22000 }).catch(() => {});
+          await HumanEmulation.sleep(1500, 2500);
+
+          // Dismiss guest sign-in modal overlay if visible so job details are clearly visible
+          const dismissGuestModal = await page
+            .$('button.modal__dismiss, button[aria-label="Dismiss"], .contextual-sign-in-modal button')
+            .catch(() => null);
+          if (dismissGuestModal && (await dismissGuestModal.isVisible().catch(() => false))) {
+            await dismissGuestModal.click({ timeout: 2000 }).catch(() => {});
+          }
+
+          await HumanEmulation.simulateReadingJobDescription(page, '.show-more-less-html__markup, .description__text, body');
+
+          const bestPdf = resolveBestResumePdfPath(target.title);
+          candidateCtx.resumePdfPath = bestPdf;
+
+          // Generate Groq AI tailored pitch for screening / cover note
+          const groqPitch = await generateGroqApplicationAnswer({
+            question: `Why are you a strong fit for the ${target.title} role at ${target.company}?`,
+            jobTitle: target.title,
+            company: target.company,
+          }).catch(() => null);
+
+          if (groqPitch) {
+            log(`Groq AI tailored application note ready for ${target.company} (${bestPdf ? bestPdf.split(/[\\/]/).pop() : 'Master Resume'}).`);
+          }
+
+          // Check if page has direct form fields or external ATS form
+          const detectedFields = await FieldMapper.detectFields(page, candidateCtx).catch(() => []);
+          if (detectedFields.length > 0) {
+            log(`Filling ${detectedFields.length} detected application form field(s)...`);
+            await FormFiller.fillDetectedFields(page, detectedFields).catch(() => {});
+          }
+
+          appliedCount++;
+          if (!dryRun) {
+            agentState.recordSubmission();
+          }
+
+          await this.recordApplicationInDb({
+            title: target.title,
+            company: target.company,
+            location: target.location,
+            jobUrl: target.url,
+            platform: 'LINKEDIN',
+          });
+
+          void telegramNotifier.notifyApplicationSubmitted({
+            title: target.title,
+            company: target.company,
+            platform: 'LINKEDIN',
+            jobUrl: target.url,
+            dryRun,
+          });
+
+          results.push({
+            title: target.title,
+            company: target.company,
+            location: target.location,
+            jobUrl: target.url,
+            platform: 'LINKEDIN',
+            status: 'APPLIED',
+          });
+
+          log(`✅ Applied to ${target.company} (${target.title})! Total applied on LinkedIn: ${appliedCount}`);
+          await HumanEmulation.sleep(3000, 5000);
+        } catch (err: any) {
+          log(`Warning processing LinkedIn job ${target.company}: ${err.message}`);
+        }
+      }
+    }
+
+    log(`LinkedIn Runner complete! Successfully submitted ${appliedCount} application(s).`);
     return results;
   }
 

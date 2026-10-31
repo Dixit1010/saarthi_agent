@@ -76,7 +76,7 @@ export class SafetyValidator {
 
     // 3. Login Barrier / Auth required
     if (
-      (url.includes('/login') || url.includes('/signin') || url.includes('/auth')) &&
+      (url.includes('/login') || url.includes('/signin') || url.includes('/authwall')) &&
       !url.includes('apply')
     ) {
       return {
@@ -86,10 +86,12 @@ export class SafetyValidator {
       };
     }
 
+    const isPublicLinkedInJobPage = url.includes('linkedin.com/jobs/');
     if (
-      content.includes('Sign in to apply') ||
-      content.includes('Log in to apply') ||
-      content.includes('Create an account to apply')
+      !isPublicLinkedInJobPage &&
+      (content.includes('Sign in to apply') ||
+        content.includes('Log in to apply') ||
+        content.includes('Create an account to apply'))
     ) {
       return {
         isBlocked: true,

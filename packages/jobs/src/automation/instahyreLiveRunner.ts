@@ -174,9 +174,9 @@ export class InstahyreLiveRunner {
             continue;
           }
 
-          // Exclude Senior / Lead / Staff / Principal / Manager / Director / SDE-2+ roles
+          // Exclude Senior / Lead / Staff / Principal / Manager / Director / Chief / CTO / SDE-2+ roles
           if (
-            /\b(senior|sr\.?|staff|principal|lead|manager|director|architect|vp|head|founding|sde\s*[234]|sde-[234]|sde\s*(ii|iii|iv)|engineer\s*(ii|iii|iv|[234]))\b/i.test(
+            /\b(senior|sr\.?|staff|principal|lead|manager|director|architect|vp|head|chief|cto|ceo|founding|sde\s*[234]|sde-[234]|sde\s*(ii|iii|iv)|engineer\s*(ii|iii|iv|[234]))\b/i.test(
               info.title
             )
           ) {
@@ -358,7 +358,7 @@ export class InstahyreLiveRunner {
       try {
         // Ensure any lingering employer profile modal or overlay is dismissed before interacting with search box
         const lingeringModalClose = await page.$(
-          '[ng-click="closeModal()"], button.close, .employer-profile-modal .modal-close, .modal-header .close'
+          '[ng-click="closeApplyModal()"], [ng-click="closeModal()"], .application-modal-backdrop, button.close, .employer-profile-modal .modal-close, .modal-header .close'
         ).catch(() => null);
         if (lingeringModalClose && (await lingeringModalClose.isVisible().catch(() => false))) {
           await lingeringModalClose.click({ force: true }).catch(() => {});
@@ -391,7 +391,7 @@ export class InstahyreLiveRunner {
           '.skills-drop-select-job-search .selectize-dropdown-content .option.active, .skills-drop-select-job-search .selectize-dropdown-content .option'
         ).catch(() => null);
         if (dropdownOpt && (await dropdownOpt.isVisible().catch(() => false))) {
-          await dropdownOpt.click({ timeout: 2000 }).catch(() => {});
+          await dropdownOpt.click({ timeout: 2000, force: true }).catch(() => {});
         } else {
           await page.keyboard.press('Enter');
         }
@@ -399,7 +399,7 @@ export class InstahyreLiveRunner {
 
         const searchBtn = await page.$('button.skills-search-btn, button:has-text("Search")');
         if (searchBtn && (await searchBtn.isVisible().catch(() => false))) {
-          await searchBtn.click({ timeout: 4000 });
+          await searchBtn.click({ timeout: 4000, force: true });
           await page.waitForTimeout(3500);
         }
 
