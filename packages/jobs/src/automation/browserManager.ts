@@ -154,6 +154,7 @@ export class BrowserManager {
 
     const pages = this.context.pages();
     const resolvedPage = pages.length > 0 && pages[0] ? pages[0] : await this.context.newPage();
+    await resolvedPage.bringToFront().catch(() => {});
     this.activePage = resolvedPage;
     return resolvedPage;
   }
@@ -189,6 +190,12 @@ export class BrowserManager {
       }
     }
 
+    const existingCookies = await this.context
+      .cookies(['https://www.linkedin.com', 'https://www.instahyre.com'])
+      .catch(() => []);
+    const hasExistingLiAt = existingCookies.some((c) => c.name === 'li_at' && c.value);
+    const hasExistingInstaSession = existingCookies.some((c) => c.name === 'sessionid' && c.value);
+
     const cookiesToAdd: Array<{
       name: string;
       value: string;
@@ -200,9 +207,8 @@ export class BrowserManager {
       sameSite?: 'Lax' | 'None' | 'Strict';
     }> = [];
 
-    if (liAt) {
-      // Clear any duplicate li_at cookies from persistent storage to prevent ERR_TOO_MANY_REDIRECTS
-      await this.context.clearCookies({ name: 'li_at' }).catch(() => {});
+    // Only seed li_at from .env if persistent browser profile does not already have one
+    if (liAt && !hasExistingLiAt) {
       cookiesToAdd.push({
         name: 'li_at',
         value: liAt,
@@ -214,8 +220,7 @@ export class BrowserManager {
       });
     }
 
-    if (instaSession) {
-      await this.context.clearCookies({ name: 'sessionid' }).catch(() => {});
+    if (instaSession && !hasExistingInstaSession) {
       cookiesToAdd.push({
         name: 'sessionid',
         value: instaSession,
@@ -226,8 +231,7 @@ export class BrowserManager {
       });
     }
 
-    if (instaCsrf) {
-      await this.context.clearCookies({ name: 'csrftoken' }).catch(() => {});
+    if (instaCsrf && !hasExistingInstaSession) {
       cookiesToAdd.push({
         name: 'csrftoken',
         value: instaCsrf,

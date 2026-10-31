@@ -94,14 +94,20 @@ export class ManualAuthHelper {
       return { authenticated: true };
     }
 
+    await page.bringToFront().catch(() => {});
+
     if (initialStatus.isChallenge) {
       log(`⚠️ Security challenge detected on ${platform}: ${initialStatus.challengeReason}`);
-      log('Please complete the verification challenge manually in the visible browser window.');
+      log('Please complete the verification challenge manually in the visible browser window (on the host laptop).');
     } else {
       log(`🔐 ${platform} authentication required (login / 2FA / OTP).`);
-      log('Please log in manually on the visible browser window.');
-      if (platform === 'LINKEDIN' && !page.url().includes('/login')) {
-        await page.goto('https://www.linkedin.com/login', { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+      log('Please log in manually on the visible Chrome window on the host laptop.');
+      if (platform === 'LINKEDIN') {
+        // Clear any expired li_at cookie so the login form works cleanly without redirect loops
+        await page.context().clearCookies({ name: 'li_at' }).catch(() => {});
+        if (!page.url().includes('/login')) {
+          await page.goto('https://www.linkedin.com/login', { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+        }
       }
     }
 
