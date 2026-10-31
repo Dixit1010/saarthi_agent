@@ -162,30 +162,18 @@ export class BrowserManager {
       });
     }
 
-    // Inject Stealth Scripts for Anti-Bot Bypass
+    // Inject non-destructive stealth guard (never overwrite real Chrome's native PluginArray or window.chrome)
     await this.context.addInitScript(() => {
-      // 1. Mask navigator.webdriver
-      Object.defineProperty(navigator, 'webdriver', {
-        get: () => undefined,
-      });
-
-      // 2. Real browser plugins
-      Object.defineProperty(navigator, 'plugins', {
-        get: () => [1, 2, 3, 4, 5],
-      });
-
-      // 3. Real languages
-      Object.defineProperty(navigator, 'languages', {
-        get: () => ['en-US', 'en', 'hi'],
-      });
-
-      // 4. Genuine chrome window object
-      (window as any).chrome = {
-        runtime: {},
-        loadTimes: function () {},
-        csi: function () {},
-        app: {},
-      };
+      try {
+        if ((navigator as any).webdriver) {
+          Object.defineProperty(Object.getPrototypeOf(navigator), 'webdriver', {
+            get: () => false,
+            configurable: true,
+          });
+        }
+      } catch {
+        // Ignore if already non-configurable false
+      }
     });
 
     // Inject authenticated platform session cookies (LinkedIn li_at / Instahyre sessionid)

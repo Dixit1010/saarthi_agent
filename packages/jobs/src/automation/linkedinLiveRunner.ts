@@ -151,7 +151,10 @@ export class LinkedInLiveRunner {
           break;
         }
         if (agentState.isPaused()) {
-          log('Agent is currently PAUSED. Halting LinkedIn scan at job card checkpoint.');
+          log('Agent is currently PAUSED. Halting LinkedIn scan immediately.');
+          break;
+        }
+        if (await this.detectBotOrSecurityChallenge(page, log)) {
           break;
         }
 
@@ -164,20 +167,23 @@ export class LinkedInLiveRunner {
             'dialog[open] button[aria-label="Dismiss"], .jobs-easy-apply-modal button[aria-label="Dismiss"], div[role="dialog"] button[aria-label="Dismiss"]'
           );
           if (lingeringModalDismiss && (await lingeringModalDismiss.isVisible().catch(() => false))) {
-            await lingeringModalDismiss.click({ timeout: 2000 }).catch(() => {});
-            await page.waitForTimeout(500);
+            await HumanEmulation.naturalClick(page, lingeringModalDismiss);
+            await HumanEmulation.sleep(500, 900);
             const discardConfirm = await page.$('button:has-text("Discard")');
             if (discardConfirm && (await discardConfirm.isVisible().catch(() => false))) {
-              await discardConfirm.click({ timeout: 2000 }).catch(() => {});
-              await page.waitForTimeout(500);
+              await HumanEmulation.naturalClick(page, discardConfirm);
+              await HumanEmulation.sleep(500, 900);
             }
           }
 
           await card.scrollIntoViewIfNeeded().catch(() => {});
-          await card.click({ timeout: 5000 }).catch(async () => {
-            await HumanEmulation.naturalClick(page, card);
-          });
-          await HumanEmulation.sleep(1800, 2800);
+          await HumanEmulation.naturalClick(page, card);
+          await HumanEmulation.sleep(2200, 3600);
+
+          if (agentState.isPaused()) {
+            log('Agent is currently PAUSED. Halting LinkedIn scan immediately.');
+            break;
+          }
 
           // Extract job details from detail pane (supports 2026 SDUI + classic top-card)
           const details = await page.evaluate(() => {
@@ -274,11 +280,16 @@ export class LinkedInLiveRunner {
             continue;
           }
 
+          // Simulate a human reading the job description (4–7s with smooth scroll & mouse movement) before clicking Easy Apply
+          await HumanEmulation.simulateReadingJobDescription(page);
+          if (agentState.isPaused()) {
+            log('Agent is currently PAUSED. Halting before clicking Easy Apply.');
+            break;
+          }
+
           log(`Clicking "Easy Apply" on ${details.company} (${details.title})...`);
-          await applyBtn.click({ timeout: 5000 }).catch(async () => {
-            await HumanEmulation.naturalClick(page, applyBtn);
-          });
-          await HumanEmulation.sleep(2000, 3000);
+          await HumanEmulation.naturalClick(page, applyBtn);
+          await HumanEmulation.sleep(2400, 3800);
 
           // Check if Easy Apply modal dialog opened (supports 2026 <dialog open> + classic .jobs-easy-apply-modal)
           const modal = await page.$(
@@ -294,11 +305,17 @@ export class LinkedInLiveRunner {
           let stepCount = 0;
 
           while (!modalDone && stepCount < 10) {
+            if (agentState.isPaused()) {
+              log('Agent is currently PAUSED. Stopping Easy Apply modal progression.');
+              break;
+            }
             stepCount++;
-            await HumanEmulation.sleep(1000, 1800);
+            await HumanEmulation.sleep(1600, 2800);
 
             // Step A: Fill all fields visible on the current modal step BEFORE checking Submit/Next
             await this.fillEasyApplyModalStep(page, details.title, details.company, cand, log);
+            await HumanEmulation.jiggleMouse(page);
+            await HumanEmulation.sleep(1200, 2400);
 
             // Step B: Check if "Submit application" button is visible on this step
             const submitBtn = await page.$(
@@ -306,6 +323,10 @@ export class LinkedInLiveRunner {
             );
 
             if (submitBtn && (await submitBtn.isVisible().catch(() => false))) {
+              if (agentState.isPaused()) {
+                log('Agent is currently PAUSED. Skipping final submission click.');
+                break;
+              }
               // Uncheck "Follow <Company>" checkbox if present so we keep the user's feed clean
               await page
                 .evaluate(() => {
@@ -327,10 +348,8 @@ export class LinkedInLiveRunner {
               }
 
               log(`Submitting LinkedIn Easy Apply application to ${details.company}...`);
-              await submitBtn.click({ timeout: 5000 }).catch(async () => {
-                await HumanEmulation.naturalClick(page, submitBtn);
-              });
-              await HumanEmulation.sleep(3000, 4500);
+              await HumanEmulation.naturalClick(page, submitBtn);
+              await HumanEmulation.sleep(3500, 5200);
 
               modalDone = true;
               appliedCount++;
@@ -341,8 +360,8 @@ export class LinkedInLiveRunner {
                 'dialog[open] button:has-text("Done"), dialog[open] button[aria-label="Dismiss"], button:has-text("Done"), button[aria-label="Dismiss"], div[role="dialog"] button.artdeco-modal__dismiss'
               );
               if (doneBtn && (await doneBtn.isVisible().catch(() => false))) {
-                await doneBtn.click({ timeout: 3000 }).catch(() => {});
-                await page.waitForTimeout(1000);
+                await HumanEmulation.naturalClick(page, doneBtn);
+                await HumanEmulation.sleep(1000, 1800);
               }
 
               // Record genuine LinkedIn Easy Apply submission in DB
@@ -374,6 +393,11 @@ export class LinkedInLiveRunner {
               log(
                 `✅ Submitted LinkedIn Easy Apply to ${details.company} (${details.title})! Now visible in LinkedIn -> My Jobs -> Applied. Total applied: ${appliedCount}`
               );
+
+              // Enforce mandatory ~2-minute (120s–138s) human cooldown gap before the next LinkedIn application
+              if (appliedCount < maxApplications && !agentState.isPaused()) {
+                await this.waitTwoMinutesBetweenApplications(page, log);
+              }
               break;
             }
 
@@ -383,8 +407,8 @@ export class LinkedInLiveRunner {
             );
 
             if (nextBtn && (await nextBtn.isVisible().catch(() => false))) {
-              await nextBtn.click({ timeout: 5000 }).catch(() => {});
-              await page.waitForTimeout(1500);
+              await HumanEmulation.naturalClick(page, nextBtn);
+              await HumanEmulation.sleep(1800, 2600);
 
               // Check if LinkedIn inline validation error occurred (e.g., "Enter a whole number" or unfilled required field)
               const hasValidationError = await page
@@ -399,9 +423,9 @@ export class LinkedInLiveRunner {
               if (hasValidationError) {
                 log('Fixing inline validation requirement on Easy Apply step...');
                 await this.fixEasyApplyValidationErrors(page, cand);
-                await page.waitForTimeout(800);
-                await nextBtn.click({ timeout: 5000 }).catch(() => {});
-                await page.waitForTimeout(1500);
+                await HumanEmulation.sleep(900, 1500);
+                await HumanEmulation.naturalClick(page, nextBtn);
+                await HumanEmulation.sleep(1800, 2600);
               }
             } else {
               log('Notice: Easy Apply modal has no Next/Review/Submit button. Closing modal.');
@@ -415,20 +439,20 @@ export class LinkedInLiveRunner {
               'dialog[open] button[aria-label="Dismiss"], button[aria-label="Dismiss"], button.artdeco-modal__dismiss, button:has-text("Done")'
             );
             if (dismissBtn && (await dismissBtn.isVisible().catch(() => false))) {
-              await dismissBtn.click({ timeout: 3000 }).catch(() => {});
-              await page.waitForTimeout(800);
+              await HumanEmulation.naturalClick(page, dismissBtn);
+              await HumanEmulation.sleep(800, 1400);
               const discardBtn = await page.$(
                 'button[data-control-name="discard_application_confirm_btn"], button:has-text("Discard")'
               );
               if (discardBtn && (await discardBtn.isVisible().catch(() => false))) {
-                await discardBtn.click({ timeout: 3000 }).catch(() => {});
-                await page.waitForTimeout(800);
+                await HumanEmulation.naturalClick(page, discardBtn);
+                await HumanEmulation.sleep(800, 1400);
               }
             }
           }
 
-          // Polite human cadence between cards
-          await HumanEmulation.sleep(4000, 7000);
+          // Polite human cadence between inspecting cards
+          await HumanEmulation.sleep(5000, 8500);
         } catch (err: any) {
           log(`Error processing job card: ${err.message}`);
         }
@@ -511,8 +535,8 @@ export class LinkedInLiveRunner {
       }
 
       log(`Answering textarea "${labelText.slice(0, 45)}..."`);
-      await textarea.fill(answer).catch(() => {});
-      await page.waitForTimeout(300);
+      await HumanEmulation.humanType(page, textarea, answer);
+      await HumanEmulation.sleep(350, 700);
     }
 
     // 3. Fill empty visible text, number, and tel <input> elements
@@ -575,16 +599,16 @@ export class LinkedInLiveRunner {
       // Phone number
       if (lbl.includes('phone') || lbl.includes('mobile') || meta.type === 'tel') {
         const cleanPhone = (cand.phone || '7060137673').replace(/^\+91\s*/, '').replace(/\D/g, '') || '7060137673';
-        await input.fill(cleanPhone).catch(() => {});
+        await HumanEmulation.humanType(page, input, cleanPhone);
         continue;
       }
 
       // City / Location typeahead combobox
       if (meta.isCombobox) {
-        await input.fill('Noida, Uttar Pradesh, India').catch(() => {});
-        await page.waitForTimeout(800);
+        await HumanEmulation.humanType(page, input, 'Noida, Uttar Pradesh, India');
+        await HumanEmulation.sleep(750, 1200);
         await page.keyboard.press('ArrowDown').catch(() => {});
-        await page.waitForTimeout(200);
+        await HumanEmulation.sleep(200, 400);
         await page.keyboard.press('Enter').catch(() => {});
         continue;
       }
@@ -615,7 +639,7 @@ export class LinkedInLiveRunner {
         } else {
           numVal = '2';
         }
-        await input.fill(numVal).catch(() => {});
+        await HumanEmulation.humanType(page, input, numVal);
         continue;
       }
 
@@ -630,7 +654,7 @@ export class LinkedInLiveRunner {
         if (groqAns && groqAns.trim().length > 0 && groqAns.length <= 180) {
           answer = groqAns.trim();
         }
-        await input.fill(answer).catch(() => {});
+        await HumanEmulation.humanType(page, input, answer);
       }
     }
 
@@ -757,6 +781,91 @@ export class LinkedInLiveRunner {
         });
       })
       .catch(() => {});
+  }
+
+  /**
+   * Enforces a mandatory ~2-minute (120s to 138s with organic random jitter) cooldown gap
+   * between every LinkedIn Easy Apply submission to prevent velocity/bot detection.
+   * Checks `agentState.isPaused()` every 1 second for immediate stop responsiveness and performs
+   * subtle human mouse/scroll gestures during the cooldown.
+   */
+  private static async waitTwoMinutesBetweenApplications(
+    page: Page,
+    log: (msg: string) => void
+  ): Promise<void> {
+    const totalSeconds = HumanEmulation.randomBetween(120, 138);
+    log(
+      `⏳ Anti-Bot Cooldown: Waiting ${Math.floor(totalSeconds / 60)}m ${totalSeconds % 60}s (${totalSeconds}s) before next LinkedIn application to prevent bot activity detection...`
+    );
+
+    for (let elapsed = 0; elapsed < totalSeconds; elapsed++) {
+      if (agentState.isPaused()) {
+        log('⏸️ Cooldown interrupted because agent was paused/stopped by user.');
+        return;
+      }
+
+      // Halfway progress update
+      if (elapsed === 60) {
+        log(`⏳ Anti-Bot Cooldown: ${totalSeconds - elapsed}s remaining before next LinkedIn application...`);
+      }
+
+      // Every ~30 seconds, do a subtle human mouse movement or small scroll so the tab stays naturally active
+      if (elapsed > 0 && elapsed % 30 === 0) {
+        await HumanEmulation.jiggleMouse(page);
+      }
+
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+
+    log('✅ 2-minute anti-bot cooldown complete. Proceeding to next LinkedIn job...');
+  }
+
+  /**
+   * Circuit breaker that checks if LinkedIn is showing any security verification, CAPTCHA,
+   * or unusual-activity warning. If detected, pauses the agent immediately to protect the account.
+   */
+  private static async detectBotOrSecurityChallenge(
+    page: Page,
+    log: (msg: string) => void
+  ): Promise<boolean> {
+    try {
+      const url = page.url().toLowerCase();
+      if (
+        url.includes('/checkpoint/challenge') ||
+        url.includes('/uas/consumer-email-challenge') ||
+        url.includes('captcha')
+      ) {
+        log(
+          '⚠️ LinkedIn security verification screen detected! Immediately pausing agent to protect your account.'
+        );
+        agentState.pause();
+        return true;
+      }
+
+      const hasChallengeText = await page
+        .evaluate(() => {
+          const text = (document.body?.innerText || '').toLowerCase();
+          return (
+            text.includes("let's do a quick security check") ||
+            text.includes('unusual activity') ||
+            text.includes('security verification') ||
+            text.includes('verify you are a human')
+          );
+        })
+        .catch(() => false);
+
+      if (hasChallengeText) {
+        log(
+          '⚠️ LinkedIn security check prompt detected on page! Immediately pausing agent to protect your account.'
+        );
+        agentState.pause();
+        return true;
+      }
+
+      return false;
+    } catch {
+      return false;
+    }
   }
 
   /**

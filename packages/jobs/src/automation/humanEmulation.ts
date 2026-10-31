@@ -6,6 +6,9 @@ import { Page, ElementHandle } from 'playwright';
  * micro-pauses, smooth variable-speed scrolling, reading time, and variable keystroke cadence.
  */
 export class HumanEmulation {
+  private static lastMouseX = 420;
+  private static lastMouseY = 340;
+
   /**
    * Generates a random integer between min and max (inclusive).
    */
@@ -22,18 +25,17 @@ export class HumanEmulation {
   }
 
   /**
-   * Moves mouse in a natural curved Bézier trajectory rather than a robotic straight line.
+   * Moves mouse in a natural curved Bézier trajectory from its last position rather than a robotic straight line.
    */
   static async humanMouseMove(page: Page, targetX: number, targetY: number): Promise<void> {
     try {
-      // Get current estimated mouse position (or start from a reasonable area)
-      const startX = HumanEmulation.randomBetween(200, 600);
-      const startY = HumanEmulation.randomBetween(200, 500);
+      const startX = HumanEmulation.lastMouseX || HumanEmulation.randomBetween(250, 650);
+      const startY = HumanEmulation.lastMouseY || HumanEmulation.randomBetween(200, 520);
 
-      const steps = HumanEmulation.randomBetween(15, 30);
-      // Control point offset for natural curve
-      const cpX = (startX + targetX) / 2 + HumanEmulation.randomBetween(-80, 80);
-      const cpY = (startY + targetY) / 2 + HumanEmulation.randomBetween(-60, 60);
+      const steps = HumanEmulation.randomBetween(16, 28);
+      // Control point offset for natural human wrist arc
+      const cpX = (startX + targetX) / 2 + HumanEmulation.randomBetween(-75, 75);
+      const cpY = (startY + targetY) / 2 + HumanEmulation.randomBetween(-55, 55);
 
       for (let i = 1; i <= steps; i++) {
         const t = i / steps;
@@ -41,18 +43,21 @@ export class HumanEmulation {
         const x = Math.round(Math.pow(1 - t, 2) * startX + 2 * (1 - t) * t * cpX + Math.pow(t, 2) * targetX);
         const y = Math.round(Math.pow(1 - t, 2) * startY + 2 * (1 - t) * t * cpY + Math.pow(t, 2) * targetY);
 
-        // Add 1-2px jitter
-        const jitterX = x + HumanEmulation.randomBetween(-1, 1);
-        const jitterY = y + HumanEmulation.randomBetween(-1, 1);
+        // Add subtle ±1px physiological tremor
+        const jitterX = x + (i < steps ? HumanEmulation.randomBetween(-1, 1) : 0);
+        const jitterY = y + (i < steps ? HumanEmulation.randomBetween(-1, 1) : 0);
 
         await page.mouse.move(jitterX, jitterY);
-        await new Promise((r) => setTimeout(r, HumanEmulation.randomBetween(8, 20)));
+        await new Promise((r) => setTimeout(r, HumanEmulation.randomBetween(7, 18)));
       }
 
-      await HumanEmulation.sleep(100, 250);
+      HumanEmulation.lastMouseX = targetX;
+      HumanEmulation.lastMouseY = targetY;
+      await HumanEmulation.sleep(90, 220);
     } catch {
-      // Fallback
       await page.mouse.move(targetX, targetY).catch(() => {});
+      HumanEmulation.lastMouseX = targetX;
+      HumanEmulation.lastMouseY = targetY;
     }
   }
 
@@ -145,32 +150,38 @@ export class HumanEmulation {
   }
 
   /**
-   * Clicks on an element naturally by moving to it first, pausing, pressing down, then releasing.
+   * Clicks on an element naturally by scrolling it into view, moving to an organic inner offset,
+   * pausing for hover hesitation, pressing down, and releasing.
    */
   static async naturalClick(page: Page, element: ElementHandle | null): Promise<boolean> {
     if (!element) return false;
     try {
+      await element.scrollIntoViewIfNeeded().catch(() => {});
+      await HumanEmulation.sleep(120, 260);
+
       const box = await element.boundingBox();
-      if (!box) {
-        await element.click();
+      if (!box || box.width <= 0 || box.height <= 0) {
+        await element.click({ timeout: 5000 });
         return true;
       }
 
-      // Target near center but with natural human slight offset
-      const targetX = box.x + box.width / 2 + HumanEmulation.randomBetween(-5, 5);
-      const targetY = box.y + box.height / 2 + HumanEmulation.randomBetween(-3, 3);
+      // Target within the safe inner 30%–70% area of the element (never dead-center 50%/50% every time)
+      const ratioX = 0.3 + Math.random() * 0.4;
+      const ratioY = 0.3 + Math.random() * 0.4;
+      const targetX = Math.round(box.x + box.width * ratioX);
+      const targetY = Math.round(box.y + box.height * ratioY);
 
       await HumanEmulation.humanMouseMove(page, targetX, targetY);
-      await HumanEmulation.sleep(80, 220); // Hover hesitation
+      await HumanEmulation.sleep(90, 240); // Hover hesitation
 
       await page.mouse.down();
-      await HumanEmulation.sleep(40, 110); // Mouse click hold duration
+      await HumanEmulation.sleep(45, 115); // Mouse click hold duration
       await page.mouse.up();
 
-      await HumanEmulation.sleep(150, 400);
+      await HumanEmulation.sleep(180, 420);
       return true;
     } catch {
-      await element.click().catch(() => {});
+      await element.click({ timeout: 5000 }).catch(() => {});
       return true;
     }
   }
