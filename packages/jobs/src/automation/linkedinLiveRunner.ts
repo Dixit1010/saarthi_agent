@@ -124,26 +124,19 @@ export class LinkedInLiveRunner {
 
       await page.waitForTimeout(3000);
 
-      // Discover Job Cards on Left Rail
+      // Discover Job Cards on Left Rail (supports both classic LinkedIn Jobs and 2026 /jobs/search-results SDUI)
       log('Scanning LinkedIn Easy Apply results...');
       await page
         .waitForSelector(
-          '.jobs-search-results-list, .scaffold-layout__list, li.scaffold-layout__list-item, div[data-job-id]',
-          { timeout: 10000 }
+          'div[role="button"]:has(button[aria-label^="Dismiss "]), .jobs-search-results-list, .scaffold-layout__list, li.scaffold-layout__list-item, div[data-job-id]',
+          { timeout: 12000 }
         )
         .catch(() => {});
 
-      // Scroll down left rail to load more cards
-      await page.evaluate(() => {
-        const container = document.querySelector('.jobs-search-results-list, .scaffold-layout__list-detail-inner ul');
-        if (container) {
-          container.scrollTop = container.scrollHeight / 2;
-        }
-      });
       await page.waitForTimeout(1500);
 
       const jobCardHandles = await page.$$(
-        'li.scaffold-layout__list-item, li.jobs-search-results__list-item, div.job-card-container, div[data-job-id]'
+        'div[role="button"]:has(button[aria-label^="Dismiss "]), li.scaffold-layout__list-item, li.jobs-search-results__list-item, div.job-card-container, div[data-job-id]'
       );
       log(`Found ${jobCardHandles.length} Easy Apply job card(s) for "${targetQuery}".`);
 
@@ -166,42 +159,66 @@ export class LinkedInLiveRunner {
         if (!card) continue;
 
         try {
-          await card.scrollIntoViewIfNeeded().catch(() => {});
-          await HumanEmulation.naturalClick(page, card);
-          await HumanEmulation.sleep(1500, 2500);
+          // Ensure any leftover Easy Apply <dialog open> from a previous card is closed before clicking the next card
+          const lingeringModalDismiss = await page.$(
+            'dialog[open] button[aria-label="Dismiss"], .jobs-easy-apply-modal button[aria-label="Dismiss"], div[role="dialog"] button[aria-label="Dismiss"]'
+          );
+          if (lingeringModalDismiss && (await lingeringModalDismiss.isVisible().catch(() => false))) {
+            await lingeringModalDismiss.click({ timeout: 2000 }).catch(() => {});
+            await page.waitForTimeout(500);
+            const discardConfirm = await page.$('button:has-text("Discard")');
+            if (discardConfirm && (await discardConfirm.isVisible().catch(() => false))) {
+              await discardConfirm.click({ timeout: 2000 }).catch(() => {});
+              await page.waitForTimeout(500);
+            }
+          }
 
-          // Extract job details from detail pane
+          await card.scrollIntoViewIfNeeded().catch(() => {});
+          await card.click({ timeout: 5000 }).catch(async () => {
+            await HumanEmulation.naturalClick(page, card);
+          });
+          await HumanEmulation.sleep(1800, 2800);
+
+          // Extract job details from detail pane (supports 2026 SDUI + classic top-card)
           const details = await page.evaluate(() => {
-            const titleEl = document.querySelector(
-              '.job-details-jobs-unified-top-card__job-title, .jobs-unified-top-card__job-title, h1'
+            const viewLink = document.querySelector('a[href*="/jobs/view/"]') as HTMLAnchorElement | null;
+            const titleEl =
+              document.querySelector(
+                '.job-details-jobs-unified-top-card__job-title, .jobs-unified-top-card__job-title, h1'
+              ) || viewLink;
+            const companyLinks = Array.from(document.querySelectorAll('a[href*="/company/"]')).filter(
+              (a) => (a.textContent || '').trim().length > 0 && !(a.textContent || '').includes('followers')
             );
-            const companyEl = document.querySelector(
-              '.job-details-jobs-unified-top-card__company-name, .jobs-unified-top-card__company-name'
-            );
+            const companyEl =
+              document.querySelector(
+                '.job-details-jobs-unified-top-card__company-name, .jobs-unified-top-card__company-name'
+              ) || companyLinks[0];
             const locEl = document.querySelector(
               '.job-details-jobs-unified-top-card__primary-description-container, .job-details-jobs-unified-top-card__primary-description, .jobs-unified-top-card__primary-description'
             );
-            const topCardText =
-              document.querySelector('.jobs-unified-top-card, .job-details-jobs-unified-top-card__container--two-pane')
-                ?.textContent || document.body.innerText;
+            const bodyText = document.body.innerText || '';
+            const hasEasyApplyBtn =
+              document.querySelector(
+                'button[aria-label*="Easy Apply"], a[aria-label*="Easy Apply"], button.jobs-apply-button'
+              ) !== null;
             const isAlreadyApplied =
-              topCardText.includes('Application submitted') ||
-              topCardText.includes('Applied ') ||
-              topCardText.includes('Applied on');
+              !hasEasyApplyBtn &&
+              (bodyText.includes('Application submitted') || bodyText.includes('Applied on'));
 
             return {
-              title: titleEl?.textContent?.trim() || 'Software Engineer',
-              company: companyEl?.textContent?.trim() || 'Company',
+              title: titleEl?.textContent?.replace(/\s+/g, ' ')?.trim() || 'Software Engineer',
+              company: companyEl?.textContent?.replace(/\s+/g, ' ')?.trim() || 'Company',
               location: locEl?.textContent?.trim()?.split('·')[0]?.trim() || 'India',
+              viewHref: viewLink?.href || '',
               isAlreadyApplied,
             };
           });
 
-          const rawPageUrl = page.url();
+          const rawPageUrl = details.viewHref || page.url();
           const jobIdMatch = rawPageUrl.match(/currentJobId=(\d+)/) || rawPageUrl.match(/\/jobs\/view\/(\d+)/);
           const currentUrl = jobIdMatch?.[1]
             ? `https://www.linkedin.com/jobs/view/${jobIdMatch[1]}/`
-            : rawPageUrl;
+            : rawPageUrl.split('?')[0] || rawPageUrl;
 
           log(`Inspecting [${i + 1}/${jobCardHandles.length}]: ${details.title} at ${details.company}`);
 
@@ -240,7 +257,7 @@ export class LinkedInLiveRunner {
 
           // Check for Easy Apply button
           const applyBtn = await page.$(
-            'button.jobs-apply-button, button[aria-label*="Easy Apply"], button:has-text("Easy Apply")'
+            'button[aria-label="Easy Apply to this job"], button[aria-label*="Easy Apply"], a[aria-label*="Easy Apply"], button.jobs-apply-button, button:has-text("Easy Apply")'
           );
 
           if (!applyBtn || !(await applyBtn.isVisible().catch(() => false))) {
@@ -258,11 +275,15 @@ export class LinkedInLiveRunner {
           }
 
           log(`Clicking "Easy Apply" on ${details.company} (${details.title})...`);
-          await HumanEmulation.naturalClick(page, applyBtn);
+          await applyBtn.click({ timeout: 5000 }).catch(async () => {
+            await HumanEmulation.naturalClick(page, applyBtn);
+          });
           await HumanEmulation.sleep(2000, 3000);
 
-          // Check if Easy Apply modal dialog opened
-          const modal = await page.$('.jobs-easy-apply-modal, div.jobs-easy-apply-content, div[role="dialog"]');
+          // Check if Easy Apply modal dialog opened (supports 2026 <dialog open> + classic .jobs-easy-apply-modal)
+          const modal = await page.$(
+            'dialog[open], dialog, .jobs-easy-apply-modal, div.jobs-easy-apply-content, div[role="dialog"]'
+          );
           if (!modal) {
             log('Easy Apply modal did not open. Moving to next card.');
             continue;
@@ -281,7 +302,7 @@ export class LinkedInLiveRunner {
 
             // Step B: Check if "Submit application" button is visible on this step
             const submitBtn = await page.$(
-              'button[aria-label*="Submit application"], button:has-text("Submit application")'
+              'dialog[open] button[aria-label*="Submit application"], dialog[open] button:has-text("Submit application"), button[aria-label*="Submit application"], button:has-text("Submit application")'
             );
 
             if (submitBtn && (await submitBtn.isVisible().catch(() => false))) {
@@ -306,7 +327,9 @@ export class LinkedInLiveRunner {
               }
 
               log(`Submitting LinkedIn Easy Apply application to ${details.company}...`);
-              await HumanEmulation.naturalClick(page, submitBtn);
+              await submitBtn.click({ timeout: 5000 }).catch(async () => {
+                await HumanEmulation.naturalClick(page, submitBtn);
+              });
               await HumanEmulation.sleep(3000, 4500);
 
               modalDone = true;
@@ -315,7 +338,7 @@ export class LinkedInLiveRunner {
 
               // Dismiss post-application confirmation dialog ("Application submitted" -> "Done" / "Dismiss")
               const doneBtn = await page.$(
-                'button:has-text("Done"), button[aria-label="Dismiss"], div[role="dialog"] button.artdeco-modal__dismiss'
+                'dialog[open] button:has-text("Done"), dialog[open] button[aria-label="Dismiss"], button:has-text("Done"), button[aria-label="Dismiss"], div[role="dialog"] button.artdeco-modal__dismiss'
               );
               if (doneBtn && (await doneBtn.isVisible().catch(() => false))) {
                 await doneBtn.click({ timeout: 3000 }).catch(() => {});
@@ -356,7 +379,7 @@ export class LinkedInLiveRunner {
 
             // Step C: Click "Next" or "Review" to advance the modal
             const nextBtn = await page.$(
-              'button[aria-label*="Continue to next step"], button[aria-label*="Review your application"], button:has-text("Next"), button:has-text("Review")'
+              'dialog[open] button[aria-label*="Continue to next step"], dialog[open] button[aria-label*="Review your application"], dialog[open] button:has-text("Next"), dialog[open] button:has-text("Review"), button[aria-label*="Continue to next step"], button[aria-label*="Review your application"], button:has-text("Next"), button:has-text("Review")'
             );
 
             if (nextBtn && (await nextBtn.isVisible().catch(() => false))) {
@@ -367,7 +390,7 @@ export class LinkedInLiveRunner {
               const hasValidationError = await page
                 .evaluate(() => {
                   const errors = document.querySelectorAll(
-                    '.jobs-easy-apply-modal .artdeco-inline-feedback--error, div[role="dialog"] .artdeco-inline-feedback--error'
+                    'dialog[open] [role="alert"], dialog[open] .artdeco-inline-feedback--error, .jobs-easy-apply-modal .artdeco-inline-feedback--error, div[role="dialog"] .artdeco-inline-feedback--error'
                   );
                   return errors.length > 0;
                 })
@@ -389,7 +412,7 @@ export class LinkedInLiveRunner {
           // Clean up modal if it didn't submit
           if (!modalDone) {
             const dismissBtn = await page.$(
-              'button[aria-label="Dismiss"], button.artdeco-modal__dismiss, button:has-text("Done")'
+              'dialog[open] button[aria-label="Dismiss"], button[aria-label="Dismiss"], button.artdeco-modal__dismiss, button:has-text("Done")'
             );
             if (dismissBtn && (await dismissBtn.isVisible().catch(() => false))) {
               await dismissBtn.click({ timeout: 3000 }).catch(() => {});
@@ -430,7 +453,7 @@ export class LinkedInLiveRunner {
   ): Promise<void> {
     // 1. Resume upload if file input is present and no resume is currently selected
     const fileInputs = await page.$$(
-      '.jobs-easy-apply-modal input[type="file"], div[role="dialog"] input[type="file"]'
+      'dialog[open] input[type="file"], dialog input[type="file"], .jobs-easy-apply-modal input[type="file"], div[role="dialog"] input[type="file"]'
     );
     for (const fi of fileInputs) {
       const hasSelectedResume = await page
@@ -438,7 +461,8 @@ export class LinkedInLiveRunner {
           const selected = document.querySelectorAll(
             '.jobs-document-upload-redesign-card__container--selected, .ui-attachment--pdf, input[name*="resume"][checked]'
           );
-          return selected.length > 0;
+          const dlgText = (document.querySelector('dialog[open], dialog')?.textContent || '').toLowerCase();
+          return selected.length > 0 || dlgText.includes('.pdf');
         })
         .catch(() => false);
       if (!hasSelectedResume) {
@@ -452,7 +476,9 @@ export class LinkedInLiveRunner {
     }
 
     // 2. Fill empty visible <textarea> elements using Answer Bank + Groq AI
-    const textareas = await page.$$('.jobs-easy-apply-modal textarea, div[role="dialog"] textarea');
+    const textareas = await page.$$(
+      'dialog[open] textarea, dialog textarea, .jobs-easy-apply-modal textarea, div[role="dialog"] textarea'
+    );
     for (const textarea of textareas) {
       const isVis = await textarea.isVisible().catch(() => false);
       if (!isVis) continue;
@@ -461,8 +487,11 @@ export class LinkedInLiveRunner {
 
       const labelText = await page
         .evaluate((el) => {
+          const id = el.getAttribute('id') || '';
+          const forLabel = id ? document.querySelector(`label[for="${id}"]`)?.textContent : '';
           const container = el.closest('div.fb-dash-form-element, div.artdeco-text-input--container');
           const label =
+            forLabel ||
             container?.querySelector('label')?.textContent ||
             el.getAttribute('aria-label') ||
             el.getAttribute('placeholder') ||
@@ -488,7 +517,7 @@ export class LinkedInLiveRunner {
 
     // 3. Fill empty visible text, number, and tel <input> elements
     const textInputs = await page.$$(
-      '.jobs-easy-apply-modal input[type="text"], .jobs-easy-apply-modal input[type="number"], .jobs-easy-apply-modal input[type="tel"], div[role="dialog"] input[type="text"], div[role="dialog"] input[type="number"], div[role="dialog"] input[type="tel"]'
+      'dialog[open] input[type="text"], dialog[open] input[type="number"], dialog[open] input[type="tel"], dialog input[type="text"], dialog input[type="number"], dialog input[type="tel"], .jobs-easy-apply-modal input[type="text"], .jobs-easy-apply-modal input[type="number"], .jobs-easy-apply-modal input[type="tel"], div[role="dialog"] input[type="text"], div[role="dialog"] input[type="number"], div[role="dialog"] input[type="tel"]'
     );
 
     for (const input of textInputs) {
@@ -499,28 +528,49 @@ export class LinkedInLiveRunner {
 
       const meta = await page
         .evaluate((el) => {
+          const id = el.getAttribute('id') || '';
+          const forLabel = id ? document.querySelector(`label[for="${id}"]`)?.textContent : '';
           const container = el.closest('div.fb-dash-form-element, div.artdeco-text-input--container, div');
           const label =
+            forLabel ||
             container?.querySelector('label')?.textContent ||
             el.getAttribute('aria-label') ||
             el.getAttribute('placeholder') ||
             '';
-          const id = el.getAttribute('id') || '';
           const name = el.getAttribute('name') || '';
           const type = el.getAttribute('type') || 'text';
           const role = el.getAttribute('role') || '';
+          const required = (el as HTMLInputElement).required || label.includes('*');
           return {
             label: label.replace(/\s+/g, ' ').trim(),
             lowerLabel: label.toLowerCase(),
             id: id.toLowerCase(),
             name: name.toLowerCase(),
             type: type.toLowerCase(),
-            isCombobox: role === 'combobox' || id.includes('city') || label.toLowerCase().includes('city') || label.toLowerCase().includes('location'),
+            required,
+            isCombobox:
+              role === 'combobox' ||
+              id.includes('city') ||
+              label.toLowerCase().includes('city') ||
+              label.toLowerCase().includes('location'),
           };
         }, input)
-        .catch(() => ({ label: '', lowerLabel: '', id: '', name: '', type: 'text', isCombobox: false }));
+        .catch(() => ({
+          label: '',
+          lowerLabel: '',
+          id: '',
+          name: '',
+          type: 'text',
+          required: false,
+          isCombobox: false,
+        }));
 
       const lbl = `${meta.lowerLabel} ${meta.id} ${meta.name}`;
+
+      // Skip optional Photo / avatar upload text fields
+      if (lbl.includes('photo') && !meta.required) {
+        continue;
+      }
 
       // Phone number
       if (lbl.includes('phone') || lbl.includes('mobile') || meta.type === 'tel') {
@@ -588,15 +638,16 @@ export class LinkedInLiveRunner {
     await page
       .evaluate((candidate) => {
         const selects = document.querySelectorAll(
-          '.jobs-easy-apply-modal select, div[role="dialog"] select'
+          'dialog[open] select, dialog select, .jobs-easy-apply-modal select, div[role="dialog"] select'
         );
         selects.forEach((sel: any) => {
           const currentVal = (sel.value || '').trim().toLowerCase();
           if (currentVal && currentVal !== 'select an option' && currentVal !== '--' && sel.selectedIndex > 0) {
             return;
           }
+          const forLabel = sel.id ? document.querySelector(`label[for="${sel.id}"]`)?.textContent : '';
           const container = sel.closest('div.fb-dash-form-element, div');
-          const label = (container?.querySelector('label')?.textContent || '').toLowerCase();
+          const label = (forLabel || container?.querySelector('label')?.textContent || '').toLowerCase();
           const options = Array.from(sel.options) as HTMLOptionElement[];
           if (options.length <= 1) return;
 
@@ -648,7 +699,7 @@ export class LinkedInLiveRunner {
     await page
       .evaluate(() => {
         const fieldsets = document.querySelectorAll(
-          '.jobs-easy-apply-modal fieldset, div[role="dialog"] fieldset'
+          'dialog[open] fieldset, dialog fieldset, .jobs-easy-apply-modal fieldset, div[role="dialog"] fieldset'
         );
         fieldsets.forEach((fs) => {
           const radios = Array.from(fs.querySelectorAll('input[type="radio"]')) as HTMLInputElement[];
@@ -693,7 +744,7 @@ export class LinkedInLiveRunner {
     await page
       .evaluate(() => {
         const checkboxes = document.querySelectorAll(
-          '.jobs-easy-apply-modal input[type="checkbox"], div[role="dialog"] input[type="checkbox"]'
+          'dialog[open] input[type="checkbox"], dialog input[type="checkbox"], .jobs-easy-apply-modal input[type="checkbox"], div[role="dialog"] input[type="checkbox"]'
         );
         checkboxes.forEach((cb: any) => {
           if (cb.id === 'follow-company-checkbox') return;
@@ -715,24 +766,17 @@ export class LinkedInLiveRunner {
   private static async fixEasyApplyValidationErrors(page: Page, cand: any): Promise<void> {
     await page
       .evaluate((candidate) => {
-        const errorContainers = document.querySelectorAll(
-          '.jobs-easy-apply-modal .fb-dash-form-element, div[role="dialog"] .fb-dash-form-element'
+        const inputs = document.querySelectorAll(
+          'dialog[open] input[type="text"], dialog[open] input[type="number"], .jobs-easy-apply-modal input[type="text"], .jobs-easy-apply-modal input[type="number"]'
         );
-        errorContainers.forEach((container) => {
-          const errEl = container.querySelector('.artdeco-inline-feedback--error');
-          if (!errEl) return;
-          const errText = (errEl.textContent || '').toLowerCase();
-          const input = container.querySelector('input[type="text"], input[type="number"]') as HTMLInputElement | null;
-          if (input) {
-            if (errText.includes('whole number') || errText.includes('valid number') || errText.includes('decimal') || errText.includes('enter a number')) {
-              input.value = '2';
-              input.dispatchEvent(new Event('input', { bubbles: true }));
-              input.dispatchEvent(new Event('change', { bubbles: true }));
-            } else if (!input.value) {
-              input.value = String(Math.round(candidate.experienceYears || 2));
-              input.dispatchEvent(new Event('input', { bubbles: true }));
-              input.dispatchEvent(new Event('change', { bubbles: true }));
-            }
+        inputs.forEach((inp: any) => {
+          const val = (inp.value || '').trim();
+          const forLabel = inp.id ? document.querySelector(`label[for="${inp.id}"]`)?.textContent || '' : '';
+          if (forLabel.toLowerCase().includes('photo')) return;
+          if (!val || /^\d+\.\d+$/.test(val)) {
+            inp.value = String(Math.round(candidate.experienceYears || 2));
+            inp.dispatchEvent(new Event('input', { bubbles: true }));
+            inp.dispatchEvent(new Event('change', { bubbles: true }));
           }
         });
       }, cand)
