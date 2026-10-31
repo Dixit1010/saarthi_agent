@@ -108,6 +108,22 @@ export class ManualAuthHelper {
         if (!page.url().includes('/login')) {
           await page.goto('https://www.linkedin.com/login', { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
         }
+        await page.bringToFront().catch(() => {});
+        const defaultEmail = process.env.LINKEDIN_EMAIL || 'dixitkumar300@gmail.com';
+        await page
+          .evaluate((email) => {
+            const userInp = document.querySelector('input#username, input[name="session_key"]') as HTMLInputElement | null;
+            if (userInp && !userInp.value) {
+              userInp.value = email;
+              userInp.dispatchEvent(new Event('input', { bubbles: true }));
+              userInp.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            const passInp = document.querySelector('input#password, input[name="session_password"]') as HTMLInputElement | null;
+            if (passInp) {
+              passInp.focus();
+            }
+          }, defaultEmail)
+          .catch(() => {});
       }
     }
 
