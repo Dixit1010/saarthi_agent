@@ -47,6 +47,7 @@ export class BrowserManager {
     // 1. On Windows, connect to (or launch via interactive Scheduled Task) the visible taskbar Chrome on CDP port 9222
     if (usePersistent && process.platform === 'win32') {
       try {
+        await this.pruneExtraCdpTabs();
         this.browser = await chromium.connectOverCDP('http://127.0.0.1:9222', { timeout: 15000 });
         this.context = this.browser.contexts()[0] || null;
         if (this.context) {
@@ -66,6 +67,7 @@ export class BrowserManager {
             );
             execSync(`schtasks /Run /TN "SaarthiVisibleBrowser"`, { stdio: 'ignore' });
             await new Promise((r) => setTimeout(r, 3500));
+            await this.pruneExtraCdpTabs();
             this.browser = await chromium.connectOverCDP('http://127.0.0.1:9222', { timeout: 15000 });
             this.context = this.browser.contexts()[0] || null;
             if (this.context) {
@@ -200,6 +202,26 @@ export class BrowserManager {
     await resolvedPage.bringToFront().catch(() => {});
     this.activePage = resolvedPage;
     return resolvedPage;
+  }
+
+  private async pruneExtraCdpTabs(): Promise<void> {
+    try {
+      const res = await fetch('http://127.0.0.1:9222/json/list', { signal: AbortSignal.timeout(2000) });
+      if (!res.ok) return;
+      const targets = (await res.json()) as Array<{ id: string; type: string; url: string }>;
+      const pageTargets = targets.filter((t) => t.type === 'page');
+      if (pageTargets.length <= 1) return;
+      let keptOne = false;
+      for (const pt of pageTargets) {
+        if (!keptOne && !pt.url.includes('accounts.google.com/gsi')) {
+          keptOne = true;
+          continue;
+        }
+        await fetch(`http://127.0.0.1:9222/json/close/${pt.id}`, { signal: AbortSignal.timeout(1000) }).catch(() => {});
+      }
+    } catch {
+      // Ignore if CDP is not listening yet
+    }
   }
 
   private async injectSessionCookies(): Promise<void> {
