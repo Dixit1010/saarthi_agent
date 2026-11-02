@@ -47,13 +47,17 @@ This task list tracks all implementation deliverables across the 8 development p
 
 ---
 
-## Phase 5 — Application Agent (Browser Automation)
-- [ ] Set up Playwright automation runner in isolated worker context.
-- [ ] Build internal Mock Job Site (`/mock-job-site/...`) for deterministic, safe browser testing.
-- [ ] Implement Form Detector & Semantic Field Mapper with heuristic scoring.
-- [ ] Build Form Filler for inputs, selects, radio buttons, and resume upload.
-- [ ] Implement CAPTCHA & anti-bot challenge detection with immediate agent pause and user alert.
-- [ ] Build pre-submission Application Review modal with human approval gate (`[Approve & Submit]`).
+## Phase 5 — Application Agent & Live Browser Automation (Completed)
+- [x] Set up Playwright automation runner in persistent taskbar Chrome context (`WinSta0\Default`) via CDP port 9222.
+- [x] Build internal Mock Job Site (`/mock-job-site/...`) for deterministic, safe browser testing.
+- [x] Implement Form Detector & Semantic Field Mapper with heuristic scoring.
+- [x] Build Form Filler for inputs, textareas, selects, radio buttons, and resume upload.
+- [x] Implement CAPTCHA & anti-bot challenge detection with immediate agent pause and user alert.
+- [x] Build live LinkedIn Easy Apply runner supporting 2026 SDUI layouts, `<dialog open>` modals, and Answer Bank + Groq AI Q&A.
+- [x] Build live Naukri 1-Click apply runner with right-hand Chatbot drawer automation and strict submission confirmation.
+- [x] Build Human Emulation engine: curved Bézier mouse trajectories, variable keystroke cadence, and natural reading scroll.
+- [x] Enforce rate-limiting anti-bot cooldowns: 120s for LinkedIn Easy Apply and 60s for Naukri.
+- [x] Build pre-submission Application Review modal with human approval gate (`[Approve & Submit]`).
 
 ---
 
