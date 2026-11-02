@@ -59,22 +59,22 @@ export class HiringCafeLiveRunner {
     );
 
     // 1. Discover real direct ATS URLs indexed by Hiring.cafe (Greenhouse / Lever / Ashby boards)
-    log('Fetching live direct-ATS engineering openings indexed by Hiring.cafe...');
+    log('Fetching live direct-ATS engineering openings (Greenhouse / Lever)...');
     const directCandidates: DirectAtsJob[] = [];
     const greenhouseBoards = [
       { slug: 'canonical', company: 'Canonical' },
+      { slug: 'hackerrank', company: 'HackerRank' },
+      { slug: 'inmobi', company: 'InMobi' },
+      { slug: 'elastic', company: 'Elastic' },
       { slug: 'rubrik', company: 'Rubrik' },
-      { slug: 'postman', company: 'Postman' },
-      { slug: 'cloudflare', company: 'Cloudflare' },
-      { slug: 'databricks', company: 'Databricks' },
-      { slug: 'gitlab', company: 'GitLab' },
+      { slug: 'deliveroo', company: 'Deliveroo' },
     ];
 
     for (const board of greenhouseBoards) {
       try {
         const res = await fetch(`https://boards-api.greenhouse.io/v1/boards/${board.slug}/jobs`, {
           headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-          signal: AbortSignal.timeout(5000),
+          signal: AbortSignal.timeout(6000),
         });
         if (!res.ok) continue;
         const data = (await res.json()) as { jobs?: any[] };
@@ -86,9 +86,9 @@ export class HiringCafeLiveRunner {
           const url = String(item.absolute_url || '').trim();
           if (!title || !url || appliedUrls.has(url)) continue;
 
-          const isTech = /software|backend|c\+\+|systems|embedded|platform|fullstack|full[\s-]stack|developer|engineer/i.test(title);
-          const isNotSenior = !/\b(senior|sr\.?|staff|principal|manager|director|vp|head|lead)\b/i.test(title);
-          const isLocMatch = /india|remote|bengaluru|bangalore|noida|gurgaon|pune|hyderabad|anywhere|emea|apac/i.test(loc);
+          const isTech = /software|backend|c\+\+|systems|embedded|firmware|hardware|platform|developer|engineer/i.test(title);
+          const isNotSenior = !/\b(senior|sr\.?|staff|principal|manager|director|vp|head|chief)\b/i.test(title);
+          const isLocMatch = /india|remote|bengaluru|bangalore|noida|gurgaon|delhi|pune|hyderabad|anywhere|emea|apac/i.test(loc);
 
           if (isTech && isNotSenior && isLocMatch) {
             directCandidates.push({
@@ -249,7 +249,7 @@ export class HiringCafeLiveRunner {
           company: cand.company,
           location: cand.location,
           jobUrl: cand.url,
-          platform: 'INSTAHYRE',
+          platform: 'HIRING_CAFE',
           status: 'APPLIED',
           reason: `Filled ${fillRes.filledCount} ATS fields + Resume PDF & submitted`,
         });

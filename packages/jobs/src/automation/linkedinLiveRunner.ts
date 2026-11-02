@@ -24,7 +24,7 @@ export interface LiveJobResult {
   company: string;
   location?: string;
   jobUrl: string;
-  platform: 'LINKEDIN' | 'INSTAHYRE' | 'AMAZON' | 'SIEMENS' | 'OTHER';
+  platform: 'LINKEDIN' | 'INSTAHYRE' | 'HIRING_CAFE' | 'NAUKRI' | 'AMAZON' | 'SIEMENS' | 'OTHER';
   status: 'APPLIED' | 'SKIPPED' | 'ALREADY_APPLIED' | 'FAILED';
   reason?: string;
 }
