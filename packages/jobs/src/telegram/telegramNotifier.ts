@@ -97,6 +97,23 @@ export class TelegramNotifier {
     return this.client.sendMessage(this.chatId, text);
   }
 
+  public async notifyTrackedJobsDiscovered(count: number, isTest?: boolean): Promise<boolean> {
+    if (!this.client || !this.chatId) return false;
+    const text = [
+      `${this.formatTestPrefix(isTest)}📌 <b>Discovered ${count} New Tier-1 Tracked Jobs!</b>`,
+      `Target roles found from top companies (Siemens, Synopsys, Qualcomm, NVIDIA, MTS, Embedded C++).`,
+      `Direct application required. Tap below or send <code>/tracked</code> to view direct links.`,
+    ].join('\n');
+
+    return this.client.sendMessage(this.chatId, text, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '📌 View Tracked Jobs', callback_data: 'cmd:tracked' }],
+        ],
+      },
+    });
+  }
+
   public async notifyJobFound(job: {
     title: string;
     company: string;

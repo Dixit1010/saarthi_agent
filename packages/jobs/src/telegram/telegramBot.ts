@@ -5,7 +5,7 @@ import { telegramNotifier } from './telegramNotifier.js';
 import { LiveJobRunner } from '../automation/liveJobRunner.js';
 import { prisma } from '@saarthi/database';
 
-type PlatformKey = 'LINKEDIN' | 'INSTAHYRE' | 'HIRING_CAFE' | 'NAUKRI' | 'AMAZON' | 'SIEMENS';
+type PlatformKey = 'LINKEDIN' | 'INSTAHYRE' | 'HIRING_CAFE' | 'NAUKRI' | 'AMAZON' | 'SIEMENS' | 'TRACKED';
 
 export class TelegramBot {
   private static instance: TelegramBot | null = null;
@@ -65,7 +65,10 @@ export class TelegramBot {
           { text: '☕ Run Hiring.cafe', callback_data: 'run:HIRING_CAFE' },
         ],
         [
+          { text: '📌 Tracked Roles (Tier-1)', callback_data: 'cmd:tracked' },
           { text: '📋 Applied Jobs', callback_data: 'cmd:applied' },
+        ],
+        [
           { text: '🎯 Top Matches', callback_data: 'cmd:jobs' },
           { text: '📜 Logs', callback_data: 'cmd:logs' },
         ],
@@ -105,7 +108,8 @@ export class TelegramBot {
     void this.client?.setMyCommands([
       { command: 'panel', description: 'Open 1-tap control panel' },
       { command: 'status', description: 'Agent status & daily count' },
-      { command: 'run', description: 'Launch auto-apply (e.g. /run instahyre)' },
+      { command: 'tracked', description: 'View tracked Tier-1 external roles' },
+      { command: 'run', description: 'Launch auto-apply (e.g. /run linkedin)' },
       { command: 'applied', description: 'View recent applied jobs' },
       { command: 'jobs', description: 'View top unapplied matches' },
       { command: 'logs', description: 'View latest live browser logs' },
@@ -286,6 +290,65 @@ export class TelegramBot {
     await this.client.sendMessage(this.chatId, msg, { disable_web_page_preview: true });
   }
 
+  private async sendTrackedJobs(): Promise<void> {
+    if (!this.client || !this.chatId) return;
+
+    const trackedApps = await prisma.application.findMany({
+      where: {
+        OR: [
+          { status: 'TRACKED' },
+          { job: { sources: { some: { sourceName: 'linkedin_tracked' } } } },
+        ],
+      },
+      include: {
+        job: {
+          include: { sources: true, matches: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 12,
+    });
+
+    const totalCount = await prisma.application.count({
+      where: {
+        OR: [
+          { status: 'TRACKED' },
+          { job: { sources: { some: { sourceName: 'linkedin_tracked' } } } },
+        ],
+      },
+    });
+
+    if (trackedApps.length === 0) {
+      await this.client.sendMessage(
+        this.chatId,
+        `📌 <b>Tracked Tier-1 External Jobs: 0</b>\nNo tracked external jobs recorded yet. Run LinkedIn (<code>/run linkedin</code>) to discover target non-Easy Apply roles!`
+      );
+      return;
+    }
+
+    const lines = trackedApps.map((app, i) => {
+      const title = escapeHtml(app.job?.title || 'Engineer');
+      const company = escapeHtml(app.job?.company || 'Company');
+      const loc = escapeHtml(app.job?.location || 'India');
+      const rawUrl = app.job?.sources?.[0]?.sourceUrl || app.job?.canonicalUrl || '';
+      const cleanUrl = rawUrl.split('#')[0] || rawUrl;
+      const score = app.job?.matches?.[0]?.score || 92;
+      return `${i + 1}. <b>${title}</b> @ <b>${company}</b> <i>(${loc} • ${score}%)</i>\n   👉 <a href="${escapeHtml(cleanUrl)}">🔗 Open on LinkedIn / Direct Apply</a>`;
+    });
+
+    const msg = [
+      `📌 <b>Tracked Tier-1 External Jobs (${totalCount} Total)</b> — Latest ${trackedApps.length}:`,
+      `<i>Direct apply required on company site or LinkedIn.</i>`,
+      '',
+      ...lines,
+    ].join('\n');
+
+    await this.client.sendMessage(this.chatId, msg, {
+      disable_web_page_preview: true,
+      reply_markup: this.getControlKeyboard(),
+    });
+  }
+
   private async sendTopMatches(): Promise<void> {
     if (!this.client || !this.chatId) return;
 
@@ -373,6 +436,7 @@ export class TelegramBot {
       if (lower.includes('hiring') || lower.includes('cafe')) return this.launchPlatformRun(['HIRING_CAFE']);
       if (lower.includes('all')) return this.launchPlatformRun(['INSTAHYRE', 'LINKEDIN', 'NAUKRI', 'HIRING_CAFE']);
     }
+    if (/\b(tracked|tier1|tier-1|target|external)\b/.test(lower)) return this.sendTrackedJobs();
     if (/\b(applied|applications|history)\b/.test(lower)) return this.sendAppliedSummary();
     if (/\b(log|logs|progress)\b/.test(lower)) return this.sendLiveLogs();
     if (/\b(status|state)\b/.test(lower)) return this.sendStatus();
@@ -452,7 +516,8 @@ export class TelegramBot {
       case '/panel': {
         const helpMessage = [
           `🤖 <b>Saarthi Control Panel</b>`,
-          `• <code>/run instahyre</code> | <code>linkedin</code> | <code>naukri</code> | <code>hiringcafe</code>`,
+          `• <code>/run linkedin</code> | <code>naukri</code> | <code>instahyre</code> | <code>hiringcafe</code>`,
+          `• <code>/tracked</code> — View tracked Tier-1 external roles (Siemens, Synopsys, Qualcomm, NVIDIA, MTS, etc.)`,
           `• <code>/applied</code> — Recent applied jobs`,
           `• <code>/jobs</code> — Top unapplied matches`,
           `• <code>/logs</code> — Live browser logs`,
@@ -466,6 +531,12 @@ export class TelegramBot {
 
       case '/status': {
         await this.sendStatus();
+        break;
+      }
+
+      case '/tracked':
+      case '/external': {
+        await this.sendTrackedJobs();
         break;
       }
 
@@ -566,6 +637,7 @@ export class TelegramBot {
 
     if (action === 'cmd') {
       if (identifier === 'applied') await this.sendAppliedSummary();
+      else if (identifier === 'tracked') await this.sendTrackedJobs();
       else if (identifier === 'jobs') await this.sendTopMatches();
       else if (identifier === 'logs') await this.sendLiveLogs();
       else if (identifier === 'status') await this.sendStatus();

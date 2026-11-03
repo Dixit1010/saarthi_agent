@@ -959,3 +959,155 @@ export class LinkedInLiveRunner {
     }
   }
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// Tier-1 Non-Easy-Apply Tracker (static methods, no f_AL=true)
+// ──────────────────────────────────────────────────────────────────────────
+
+export const TIER1_TARGET_QUERIES: string[] = [
+  '("C++" OR "Software Engineer" OR "MTS") AND ("Siemens" OR "Synopsys" OR "Cadence" OR "NXP" OR "STMicroelectronics" OR "Qualcomm" OR "NVIDIA" OR "AMD" OR "Intel" OR "ARM" OR "Broadcom" OR "Ansys" OR "Cisco") NOT ("Senior" OR "Sr" OR "Lead" OR "Staff" OR "Principal" OR "Manager")',
+  '("C++" OR "C" OR "System Software") AND ("Member of Technical Staff" OR "MTS" OR "Software Engineer" OR "R&D Engineer") NOT ("Senior" OR "Sr" OR "Lead" OR "Staff" OR "Principal" OR "Manager" OR "Director")',
+  'Embedded Firmware Engineer',
+  'C++ Software Engineer',
+];
+
+async function recordTrackedJobInDb(data: {
+  title: string;
+  company: string;
+  location?: string;
+  jobUrl: string;
+}) {
+  try {
+    const profile = await prisma.profile.findFirst({ include: { user: true } });
+    if (!profile) return;
+
+    const job = await prisma.job.upsert({
+      where: { canonicalUrl: data.jobUrl },
+      create: {
+        canonicalUrl: data.jobUrl,
+        title: data.title,
+        company: data.company,
+        location: data.location || 'India',
+        description: `Tier-1 external direct-apply role discovered via Saarthi LinkedIn tracker.`,
+        sources: {
+          create: {
+            sourceName: 'linkedin_tracked',
+            sourceUrl: data.jobUrl,
+            externalId: `tracked_${Date.now()}`,
+          },
+        },
+      },
+      update: {},
+    });
+
+    await prisma.application.upsert({
+      where: { userId_jobId: { userId: profile.userId, jobId: job.id } },
+      create: {
+        userId: profile.userId,
+        jobId: job.id,
+        status: 'TRACKED',
+        submissionMethod: 'EXTERNAL_DIRECT',
+        notes: `Tracked Tier-1 direct-apply opportunity. Must apply manually on company careers page.`,
+      },
+      update: {},
+    });
+  } catch (e: any) {
+    console.warn('[LinkedInRunner] Tracked DB warning:', e.message);
+  }
+}
+
+export async function trackTier1ExternalOpportunities(
+  page: Page,
+  log: (msg: string) => void
+): Promise<number> {
+  log('📌 Starting Tier-1 External Opportunities Tracker (non-Easy Apply)...');
+  let newlyTracked = 0;
+
+  for (let qIdx = 0; qIdx < TIER1_TARGET_QUERIES.length; qIdx++) {
+    if (agentState.isPaused()) {
+      log('Agent paused — stopping Tier-1 tracker.');
+      break;
+    }
+    const query = TIER1_TARGET_QUERIES[qIdx]!;
+    // No f_AL=true → captures both Easy Apply AND direct-apply company postings
+    const searchUrl = `https://www.linkedin.com/jobs/search/?keywords=${encodeURIComponent(query)}&location=India&f_TPR=r604800`;
+    log(`[Tier-1 ${qIdx + 1}/${TIER1_TARGET_QUERIES.length}] Searching: "${query.slice(0, 60)}..."`);
+
+    await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+    await page.waitForTimeout(3000);
+
+    await page
+      .waitForSelector('li.scaffold-layout__list-item, li.jobs-search-results__list-item, div[data-job-id]', { timeout: 10000 })
+      .catch(() => {});
+
+    const cards = await page.$$('li.scaffold-layout__list-item, li.jobs-search-results__list-item, div[data-job-id]');
+    log(`Found ${cards.length} job card(s) for Tier-1 query ${qIdx + 1}.`);
+
+    for (let i = 0; i < Math.min(cards.length, 20); i++) {
+      if (agentState.isPaused()) break;
+      const card = cards[i];
+      if (!card) continue;
+
+      try {
+        await card.scrollIntoViewIfNeeded().catch(() => {});
+        await card.click().catch(() => {});
+        await page.waitForTimeout(2000);
+
+        const details = await page.evaluate(() => {
+          const viewLink = document.querySelector('a[href*="/jobs/view/"]') as HTMLAnchorElement | null;
+          const titleEl = document.querySelector(
+            '.job-details-jobs-unified-top-card__job-title, .jobs-unified-top-card__job-title, h1'
+          ) || viewLink;
+          const companyLinks = Array.from(document.querySelectorAll('a[href*="/company/"]')).filter(
+            (a) => (a.textContent || '').trim().length > 0 && !(a.textContent || '').includes('followers')
+          );
+          const companyEl =
+            document.querySelector(
+              '.job-details-jobs-unified-top-card__company-name, .jobs-unified-top-card__company-name'
+            ) || companyLinks[0];
+          const locEl = document.querySelector(
+            '.job-details-jobs-unified-top-card__primary-description-container, .jobs-unified-top-card__primary-description'
+          );
+          return {
+            title: titleEl?.textContent?.replace(/\s+/g, ' ')?.trim() || '',
+            company: companyEl?.textContent?.replace(/\s+/g, ' ')?.trim() || '',
+            location: locEl?.textContent?.trim()?.split('·')[0]?.trim() || 'India',
+            viewHref: viewLink?.href || '',
+          };
+        });
+
+        if (!details.title || !details.company) continue;
+
+        // Skip senior/lead roles
+        if (/\b(senior|sr\.?|staff|principal|lead|manager|director|vp|head|architect|chief)\b/i.test(details.title)) {
+          continue;
+        }
+
+        const jobIdMatch = details.viewHref.match(/currentJobId=(\d+)/) || details.viewHref.match(/\/jobs\/view\/(\d+)/);
+        const jobUrl = jobIdMatch?.[1]
+          ? `https://www.linkedin.com/jobs/view/${jobIdMatch[1]}/`
+          : details.viewHref.split('?')[0] || details.viewHref;
+
+        if (!jobUrl) continue;
+
+        await recordTrackedJobInDb({
+          title: details.title,
+          company: details.company,
+          location: details.location,
+          jobUrl,
+        });
+        newlyTracked++;
+        log(`📌 Tracked: ${details.title} @ ${details.company}`);
+      } catch (err: any) {
+        log(`Tier-1 card error: ${err.message}`);
+      }
+
+      await page.waitForTimeout(1500);
+    }
+
+    await page.waitForTimeout(3000);
+  }
+
+  log(`📌 Tier-1 tracker done. Tracked ${newlyTracked} new roles.`);
+  return newlyTracked;
+}

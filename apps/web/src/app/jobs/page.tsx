@@ -367,6 +367,7 @@ export default function JobsPage() {
   const jobMatchesPlatform = (j: JobItem, platform: string) => {
     if (platform === 'ALL') return true;
     if (platform === 'APPLIED') return j.applicationStatus === 'APPLIED';
+    if (platform === 'TRACKED') return j.source === 'linkedin_tracked' || j.applicationStatus === 'TRACKED';
     const p = platform.toLowerCase();
     const src = (j.source || '').toLowerCase();
     const comp = (j.company || '').toLowerCase();
@@ -457,6 +458,13 @@ export default function JobsPage() {
   const renderSourceBadge = (source?: string) => {
     if (!source) return null;
     const s = source.toLowerCase();
+    if (s.includes('linkedin_tracked') || s === 'linkedin_tracked') {
+      return (
+        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-violet-50 dark:bg-violet-950/70 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800 flex items-center gap-1">
+          📌 Tracked (Direct Apply)
+        </span>
+      );
+    }
     if (s.includes('linkedin')) {
       return (
         <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-sky-50 dark:bg-sky-950/70 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800 flex items-center gap-1">
@@ -839,6 +847,7 @@ export default function JobsPage() {
         {[
           { id: 'ALL', label: 'All Ecosystems' },
           { id: 'APPLIED', label: '✅ Applied Jobs' },
+          { id: 'TRACKED', label: '📌 Tracked External' },
           { id: 'Instahyre', label: '⚡ Instahyre' },
           { id: 'HiringCafe', label: '☕ Hiring.cafe' },
           { id: 'Naukri', label: '🇮🇳 Naukri.com' },
@@ -893,6 +902,11 @@ export default function JobsPage() {
                 {job.applicationStatus === 'APPLIED' && (
                   <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-600 text-white shadow-xs flex items-center gap-1">
                     ✓ APPLIED
+                  </span>
+                )}
+                {job.applicationStatus === 'TRACKED' && (
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-violet-600 text-white shadow-xs flex items-center gap-1">
+                    📌 DIRECT APPLY
                   </span>
                 )}
                 <MatchBadge score={job.matchScore} />
@@ -950,37 +964,51 @@ export default function JobsPage() {
               >
                 Inspect
               </button>
-              <button
-                onClick={() => setTailoringJob(job)}
-                className="px-3.5 py-2 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-xs font-semibold shadow-xs transition-colors"
-              >
-                Tailor Resume
-              </button>
-              <button
-                onClick={() => setBrowserApplyJob(job)}
-                className="px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-xs transition-colors flex items-center gap-1.5"
-                title="Launch Playwright browser automation to fill external portal"
-              >
-                <Globe className="h-3 w-3" />
-                Browser Apply
-              </button>
-              <button
-                disabled={applyingJobId === job.id}
-                onClick={() => handleAutoApply(job)}
-                className="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold shadow-xs transition-colors flex items-center gap-1.5"
-              >
-                {applyingJobId === job.id ? (
-                  <>
-                    <RefreshCw className="h-3 w-3 animate-spin" />
-                    Applying...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="h-3 w-3" />
-                    Auto-Apply
-                  </>
-                )}
-              </button>
+              {job.applicationStatus === 'TRACKED' ? (
+                <a
+                  href={job.canonicalUrl || job.sourceUrl || '#'}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3.5 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold shadow-xs transition-colors flex items-center gap-1.5"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  Apply Direct ↗
+                </a>
+              ) : (
+                <>
+                  <button
+                    onClick={() => setTailoringJob(job)}
+                    className="px-3.5 py-2 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-xs font-semibold shadow-xs transition-colors"
+                  >
+                    Tailor Resume
+                  </button>
+                  <button
+                    onClick={() => setBrowserApplyJob(job)}
+                    className="px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-xs transition-colors flex items-center gap-1.5"
+                    title="Launch Playwright browser automation to fill external portal"
+                  >
+                    <Globe className="h-3 w-3" />
+                    Browser Apply
+                  </button>
+                  <button
+                    disabled={applyingJobId === job.id}
+                    onClick={() => handleAutoApply(job)}
+                    className="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold shadow-xs transition-colors flex items-center gap-1.5"
+                  >
+                    {applyingJobId === job.id ? (
+                      <>
+                        <RefreshCw className="h-3 w-3 animate-spin" />
+                        Applying...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="h-3 w-3" />
+                        Auto-Apply
+                      </>
+                    )}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         ))}

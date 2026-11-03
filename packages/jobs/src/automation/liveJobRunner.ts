@@ -1,5 +1,5 @@
 import { BrowserManager } from './browserManager.js';
-import { LinkedInLiveRunner, LiveJobResult } from './linkedinLiveRunner.js';
+import { LinkedInLiveRunner, LiveJobResult, trackTier1ExternalOpportunities } from './linkedinLiveRunner.js';
 import { InstahyreLiveRunner } from './instahyreLiveRunner.js';
 import { HiringCafeLiveRunner } from './hiringCafeLiveRunner.js';
 import { NaukriLiveRunner } from './naukriLiveRunner.js';
@@ -15,7 +15,8 @@ export type LiveRunnerPlatform =
   | 'NAUKRI'
   | 'AMAZON'
   | 'SIEMENS'
-  | 'OTHER';
+  | 'OTHER'
+  | 'TRACKED';
 
 export interface LiveRunnerExecutionOptions {
   platforms?: LiveRunnerPlatform[];
@@ -113,7 +114,20 @@ export class LiveJobRunner {
           log(`LinkedIn Runner encountered error: ${err.message}`);
         }
       } else {
-        log('--- Skipping LinkedIn Phase (Platform Toggle is OFF) ---');
+        log('--- Skipping LinkedIn Phase (Platform Toggle is OFF) ---')
+      }
+
+      // 1b. Always track Tier-1 external (non-Easy Apply) roles when LinkedIn is enabled OR TRACKED is requested
+      if (platforms.includes('LINKEDIN') || platforms.includes('TRACKED')) {
+        log('--- Starting Tier-1 External Roles Tracker Phase ---');
+        try {
+          const newTracked = await trackTier1ExternalOpportunities(page, (m) => log(`[Tier-1] ${m}`));
+          if (newTracked > 0) {
+            void telegramNotifier.notifyTrackedJobsDiscovered(newTracked);
+          }
+        } catch (err: any) {
+          log(`Tier-1 Tracker encountered error: ${err.message}`);
+        }
       }
 
       // 2. Run Instahyre if toggled ON
