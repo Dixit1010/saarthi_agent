@@ -1034,78 +1034,129 @@ export async function trackTier1ExternalOpportunities(
     log(`[Tier-1 ${qIdx + 1}/${TIER1_TARGET_QUERIES.length}] Searching: "${query.slice(0, 60)}..."`);
 
     await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(4000);
 
+    // Wait for either SDUI cards or classic scaffold list
     await page
-      .waitForSelector('li.scaffold-layout__list-item, li.jobs-search-results__list-item, div[data-job-id]', { timeout: 10000 })
+      .waitForSelector(
+        '[componentkey*="job-card-component-ref-"], div[role="button"]:has(button[aria-label^="Dismiss "]), li.scaffold-layout__list-item, li.jobs-search-results__list-item, div.job-card-container, div[data-job-id]',
+        { timeout: 12000 }
+      )
       .catch(() => {});
 
-    const cards = await page.$$('li.scaffold-layout__list-item, li.jobs-search-results__list-item, div[data-job-id]');
-    log(`Found ${cards.length} job card(s) for Tier-1 query ${qIdx + 1}.`);
+    // Extract all candidate job cards directly from DOM
+    const extractedJobs = await page.evaluate(() => {
+      const list: Array<{ title: string; company: string; location: string; jobUrl: string }> = [];
+      const seenIds = new Set<string>();
 
-    for (let i = 0; i < Math.min(cards.length, 20); i++) {
-      if (agentState.isPaused()) break;
-      const card = cards[i];
-      if (!card) continue;
+      // Strategy A: 2026 LinkedIn SDUI Cards
+      const sduiCards = Array.from(document.querySelectorAll('[componentkey*="job-card-component-ref-"]'));
+      for (const card of sduiCards) {
+        const componentKey = card.getAttribute('componentkey') || '';
+        const match = componentKey.match(/job-card-component-ref-(\d+)/);
+        const jobId = match ? match[1] : '';
+        if (!jobId || seenIds.has(jobId)) continue;
+        seenIds.add(jobId);
 
-      try {
-        await card.scrollIntoViewIfNeeded().catch(() => {});
-        await card.click().catch(() => {});
-        await page.waitForTimeout(2000);
+        const el = card as HTMLElement;
+        const text = el.innerText || el.textContent || '';
+        const rawLines = text
+          .split('\n')
+          .map((s) => s.trim())
+          .filter(Boolean);
 
-        const details = await page.evaluate(() => {
-          const viewLink = document.querySelector('a[href*="/jobs/view/"]') as HTMLAnchorElement | null;
-          const titleEl = document.querySelector(
-            '.job-details-jobs-unified-top-card__job-title, .jobs-unified-top-card__job-title, h1'
-          ) || viewLink;
-          const companyLinks = Array.from(document.querySelectorAll('a[href*="/company/"]')).filter(
-            (a) => (a.textContent || '').trim().length > 0 && !(a.textContent || '').includes('followers')
-          );
-          const companyEl =
-            document.querySelector(
-              '.job-details-jobs-unified-top-card__company-name, .jobs-unified-top-card__company-name'
-            ) || companyLinks[0];
-          const locEl = document.querySelector(
-            '.job-details-jobs-unified-top-card__primary-description-container, .jobs-unified-top-card__primary-description'
-          );
-          return {
-            title: titleEl?.textContent?.replace(/\s+/g, ' ')?.trim() || '',
-            company: companyEl?.textContent?.replace(/\s+/g, ' ')?.trim() || '',
-            location: locEl?.textContent?.trim()?.split('·')[0]?.trim() || 'India',
-            viewHref: viewLink?.href || '',
-          };
-        });
-
-        if (!details.title || !details.company) continue;
-
-        // Skip senior/lead roles
-        if (/\b(senior|sr\.?|staff|principal|lead|manager|director|vp|head|architect|chief)\b/i.test(details.title)) {
-          continue;
+        const cleanedLines: string[] = [];
+        for (const line of rawLines) {
+          if (
+            /^(viewed|applied|verified job|promoted|easy apply|\d+ connections?|posted|repost)/i.test(line) ||
+            /^\d+\s*(day|week|month|hour|minute)s?\s*ago/i.test(line)
+          ) {
+            continue;
+          }
+          const clean = line.replace(/\s*\([^)]*verified[^)]*\)/i, '').trim();
+          if (clean && !cleanedLines.includes(clean)) {
+            cleanedLines.push(clean);
+          }
         }
 
-        const jobIdMatch = details.viewHref.match(/currentJobId=(\d+)/) || details.viewHref.match(/\/jobs\/view\/(\d+)/);
-        const jobUrl = jobIdMatch?.[1]
-          ? `https://www.linkedin.com/jobs/view/${jobIdMatch[1]}/`
-          : details.viewHref.split('?')[0] || details.viewHref;
+        const title = cleanedLines[0] || '';
+        const company = cleanedLines[1] || '';
+        const location = cleanedLines[2] || 'India';
+        const jobUrl = `https://www.linkedin.com/jobs/view/${jobId}/`;
 
-        if (!jobUrl) continue;
+        if (title && company) {
+          list.push({ title, company, location, jobUrl });
+        }
+      }
 
+      // Strategy B: Classic LinkedIn card elements
+      if (list.length === 0) {
+        const classicCards = Array.from(
+          document.querySelectorAll(
+            'div[role="button"]:has(button[aria-label^="Dismiss "]), li.scaffold-layout__list-item, li.jobs-search-results__list-item, div.job-card-container, div[data-job-id]'
+          )
+        );
+
+        for (const card of classicCards) {
+          const link = card.querySelector('a[href*="/jobs/view/"]') as HTMLAnchorElement | null;
+          const cardId = card.getAttribute('data-job-id') || '';
+          const linkMatch = link?.href.match(/\/jobs\/view\/(\d+)/) || link?.href.match(/currentJobId=(\d+)/);
+          const jobId = cardId || (linkMatch ? linkMatch[1] : '');
+
+          if (jobId && seenIds.has(jobId)) continue;
+          if (jobId) seenIds.add(jobId);
+
+          const titleEl = card.querySelector('.job-card-list__title, .artdeco-entity-lockup__title, strong') || link;
+          const compEl = card.querySelector(
+            '.job-card-container__primary-description, .artdeco-entity-lockup__subtitle, .job-card-container__company-name'
+          );
+          const locEl = card.querySelector(
+            '.job-card-container__metadata-item, .artdeco-entity-lockup__caption'
+          );
+
+          const title = (titleEl?.textContent || '').replace(/\s+/g, ' ').trim();
+          const company = (compEl?.textContent || '').replace(/\s+/g, ' ').trim();
+          const location = (locEl?.textContent || '').trim().split('·')[0]?.trim() || 'India';
+          const jobUrl = jobId ? `https://www.linkedin.com/jobs/view/${jobId}/` : link?.href.split('?')[0] || '';
+
+          if (title && company && jobUrl) {
+            list.push({ title, company, location, jobUrl });
+          }
+        }
+      }
+
+      return list;
+    });
+
+    log(`Found ${extractedJobs.length} job card(s) for Tier-1 query ${qIdx + 1}.`);
+
+    for (const job of extractedJobs) {
+      if (agentState.isPaused()) break;
+
+      // Skip senior/lead roles
+      if (
+        /\b(senior|sr\.?|staff|principal|lead|manager|director|vp|head|architect|chief|cto|ceo)\b/i.test(
+          job.title
+        )
+      ) {
+        continue;
+      }
+
+      try {
         await recordTrackedJobInDb({
-          title: details.title,
-          company: details.company,
-          location: details.location,
-          jobUrl,
+          title: job.title,
+          company: job.company,
+          location: job.location,
+          jobUrl: job.jobUrl,
         });
         newlyTracked++;
-        log(`📌 Tracked: ${details.title} @ ${details.company}`);
+        log(`📌 Tracked: ${job.title} @ ${job.company}`);
       } catch (err: any) {
         log(`Tier-1 card error: ${err.message}`);
       }
-
-      await page.waitForTimeout(1500);
     }
 
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(2500);
   }
 
   log(`📌 Tier-1 tracker done. Tracked ${newlyTracked} new roles.`);

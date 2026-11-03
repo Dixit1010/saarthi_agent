@@ -154,7 +154,7 @@ export async function agentRoutes(app: FastifyInstance) {
   // POST Trigger Live Autonomous Application (LinkedIn, Instahyre, Hiring.cafe, Naukri, Amazon, Siemens, Other)
   app.post('/live-apply', async (req: FastifyRequest<{
     Body: {
-      platforms?: Array<'LINKEDIN' | 'INSTAHYRE' | 'HIRING_CAFE' | 'NAUKRI' | 'AMAZON' | 'SIEMENS' | 'OTHER'>;
+      platforms?: Array<'LINKEDIN' | 'INSTAHYRE' | 'HIRING_CAFE' | 'NAUKRI' | 'AMAZON' | 'SIEMENS' | 'OTHER' | 'TRACKED'>;
       headless?: boolean;
       dryRun?: boolean;
       maxApplications?: number;
